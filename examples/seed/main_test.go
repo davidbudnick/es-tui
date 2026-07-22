@@ -65,7 +65,7 @@ func TestRunSeedRich(t *testing.T) {
 	if err := run(srv.URL, true); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range demoIndexNames() {
+	for _, name := range []string{"products", "customers", "orders", "logs-app", "metrics-host", "events"} {
 		if !indices[name] {
 			t.Fatalf("missing index create for %s: %v", name, indices)
 		}
