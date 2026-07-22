@@ -3,9 +3,11 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/davidbudnick/es-tui/internal/types"
 )
 
 func (m Model) viewDocuments() string {
@@ -14,7 +16,7 @@ func (m Model) viewDocuments() string {
 		return m.viewDocumentsListOnly()
 	}
 
-	leftWidth := (totalWidth * 55) / 100
+	leftWidth := (totalWidth * 58) / 100
 	rightWidth := totalWidth - leftWidth - 1
 	panelHeight := max(m.Height-4, 12)
 
@@ -44,7 +46,7 @@ func (m Model) viewDocumentsListOnly() string {
 	var b strings.Builder
 	b.WriteString(m.buildDocumentsListPanel(max(m.Width-4, 40)))
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("j/k:nav  enter:view  e:edit  d:del  /:query  q:back"))
+	b.WriteString(helpStyle.Render("j/k:nav  enter:view  e:edit  d:del  /:search  q:back"))
 	return b.String()
 }
 
@@ -81,16 +83,42 @@ func (m Model) buildDocumentsListPanel(width int) string {
 		return b.String()
 	}
 
-	scoreW := 8
-	idW := width - scoreW - 8
-	if idW < 16 {
-		idW = 16
+	// Discover useful columns from the current page of docs
+	colA, colB := pickListColumns(m.Documents)
+	idW := 10
+	scoreW := 7
+	// remaining width for summary + optional cols
+	rest := width - idW - scoreW - 10
+	if rest < 20 {
+		rest = 20
+	}
+	sumW := rest
+	colAW, colBW := 0, 0
+	if colA != "" {
+		colAW = min(16, rest/3)
+		sumW = rest - colAW - 2
+	}
+	if colB != "" {
+		colBW = min(12, rest/4)
+		sumW = rest - colAW - colBW - 4
+	}
+	if sumW < 12 {
+		sumW = 12
 	}
 
-	header := fmt.Sprintf("  %-*s  %s", idW, "ID", "Score")
-	b.WriteString(headerStyle.Render(header))
+	// Header
+	var hdr strings.Builder
+	fmt.Fprintf(&hdr, "  %-*s  %-*s", idW, "ID", sumW, "Summary")
+	if colA != "" {
+		fmt.Fprintf(&hdr, "  %-*s", colAW, truncate(titleCase(colA), colAW))
+	}
+	if colB != "" {
+		fmt.Fprintf(&hdr, "  %-*s", colBW, truncate(titleCase(colB), colBW))
+	}
+	fmt.Fprintf(&hdr, "  %s", "Score")
+	b.WriteString(headerStyle.Render(hdr.String()))
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render(strings.Repeat("─", min(width, idW+scoreW+10))))
+	b.WriteString(dimStyle.Render(strings.Repeat("─", min(width, idW+sumW+colAW+colBW+scoreW+16))))
 	b.WriteString("\n")
 
 	maxVisible := max(m.Height-12, 5)
@@ -104,15 +132,45 @@ func (m Model) buildDocumentsListPanel(width int) string {
 	for i := start; i < end; i++ {
 		doc := m.Documents[i]
 		id := truncate(doc.ID, idW)
+		summary := truncate(docSummary(doc), sumW)
+		aVal, bVal := "", ""
+		if colA != "" {
+			aVal = truncate(fieldString(doc.Source, colA), colAW)
+		}
+		if colB != "" {
+			bVal = truncate(fieldString(doc.Source, colB), colBW)
+		}
 		score := fmt.Sprintf("%.3f", doc.Score)
+
 		if i == selectedIdx {
+			// Blue bar on ID + summary (redis-style), keep colored/meta after
 			b.WriteString(selectedStyle.Render("▶ "))
 			b.WriteString(selectedStyle.Render(fmt.Sprintf("%-*s", idW, id)))
+			b.WriteString("  ")
+			b.WriteString(selectedStyle.Render(fmt.Sprintf("%-*s", sumW, summary)))
+			if colA != "" {
+				b.WriteString("  ")
+				b.WriteString(yellowStyle.Render(fmt.Sprintf("%-*s", colAW, aVal)))
+			}
+			if colB != "" {
+				b.WriteString("  ")
+				b.WriteString(tealStyle.Render(fmt.Sprintf("%-*s", colBW, bVal)))
+			}
 			b.WriteString("  ")
 			b.WriteString(normalStyle.Render(score))
 		} else {
 			b.WriteString("  ")
-			b.WriteString(normalStyle.Render(fmt.Sprintf("%-*s", idW, id)))
+			b.WriteString(dimStyle.Render(fmt.Sprintf("%-*s", idW, id)))
+			b.WriteString("  ")
+			b.WriteString(normalStyle.Render(fmt.Sprintf("%-*s", sumW, summary)))
+			if colA != "" {
+				b.WriteString("  ")
+				b.WriteString(yellowStyle.Render(fmt.Sprintf("%-*s", colAW, aVal)))
+			}
+			if colB != "" {
+				b.WriteString("  ")
+				b.WriteString(tealStyle.Render(fmt.Sprintf("%-*s", colBW, bVal)))
+			}
 			b.WriteString("  ")
 			b.WriteString(dimStyle.Render(score))
 		}
@@ -126,6 +184,132 @@ func (m Model) buildDocumentsListPanel(width int) string {
 	b.WriteString("\n")
 	b.WriteString(dimStyle.Render(fmt.Sprintf("%d-%d of %d  (n/p page)", from+start+1, from+end, m.DocTotal)))
 	return b.String()
+}
+
+// preferred summary field names, in order of usefulness
+var summaryFieldPriority = []string{
+	"name", "title", "email", "customer_id", "order_id", "sku", "message",
+	"event_id", "host", "service", "level", "status", "company", "plan",
+}
+
+// preferred extra columns after summary
+var listColumnPriority = []string{
+	"email", "plan", "status", "company", "country", "city", "category", "brand",
+	"level", "service", "host", "customer", "tags", "type", "active",
+}
+
+func pickListColumns(docs []types.Document) (colA, colB string) {
+	// count field presence across page
+	counts := map[string]int{}
+	for _, d := range docs {
+		if d.Source == nil {
+			continue
+		}
+		for k, v := range d.Source {
+			if isScalarish(v) {
+				counts[k]++
+			}
+		}
+	}
+	// pick up to 2 from priority that exist often enough, skip ones used as summary-only
+	for _, k := range listColumnPriority {
+		if counts[k] == 0 {
+			continue
+		}
+		// avoid duplicating the primary summary field
+		if colA == "" {
+			colA = k
+			continue
+		}
+		if k != colA {
+			colB = k
+			break
+		}
+	}
+	return colA, colB
+}
+
+func docSummary(doc types.Document) string {
+	if doc.Source == nil {
+		if doc.Raw != "" {
+			return truncate(strings.ReplaceAll(doc.Raw, "\n", " "), 60)
+		}
+		return doc.ID
+	}
+	for _, k := range summaryFieldPriority {
+		if s := fieldString(doc.Source, k); s != "" {
+			return s
+		}
+	}
+	// fallback: first string-ish field alphabetically
+	keys := make([]string, 0, len(doc.Source))
+	for k := range doc.Source {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if s := fieldString(doc.Source, k); s != "" {
+			return s
+		}
+	}
+	return doc.ID
+}
+
+func fieldString(src map[string]any, key string) string {
+	if src == nil {
+		return ""
+	}
+	v, ok := src[key]
+	if !ok || v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		if t == float64(int64(t)) {
+			return fmt.Sprintf("%d", int64(t))
+		}
+		return fmt.Sprintf("%g", t)
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, x := range t {
+			parts = append(parts, fmt.Sprint(x))
+			if len(parts) >= 3 {
+				break
+			}
+		}
+		return strings.Join(parts, ",")
+	default:
+		s := fmt.Sprint(t)
+		if len(s) > 40 {
+			return s[:37] + "..."
+		}
+		return s
+	}
+}
+
+func isScalarish(v any) bool {
+	switch v.(type) {
+	case string, float64, bool, int, int64:
+		return true
+	case []any:
+		return true
+	default:
+		return false
+	}
+}
+
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func (m Model) buildDocumentPreviewPanel(width int) string {
@@ -151,14 +335,62 @@ func (m Model) buildDocumentPreviewPanel(width int) string {
 	b.WriteString(normalStyle.Render(doc.Index))
 	b.WriteString("\n\n")
 
+	if s := docSummary(doc); s != "" && s != doc.ID {
+		b.WriteString(keyStyle.Render("Summary: "))
+		b.WriteString(normalStyle.Render(truncate(s, max(width-10, 8))))
+		b.WriteString("\n\n")
+	}
+
 	b.WriteString(keyStyle.Render("Score: "))
 	b.WriteString(normalStyle.Render(fmt.Sprintf("%.4f", doc.Score)))
 	b.WriteString("\n\n")
 
+	// Field chips: top-level scalars for quick scan
+	if len(doc.Source) > 0 {
+		b.WriteString(keyStyle.Render("Fields"))
+		b.WriteString("\n\n")
+		keys := make([]string, 0, len(doc.Source))
+		for k := range doc.Source {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		// prefer known fields first
+		ordered := make([]string, 0, len(keys))
+		seen := map[string]bool{}
+		for _, k := range summaryFieldPriority {
+			if _, ok := doc.Source[k]; ok {
+				ordered = append(ordered, k)
+				seen[k] = true
+			}
+		}
+		for _, k := range keys {
+			if !seen[k] {
+				ordered = append(ordered, k)
+			}
+		}
+		shown := 0
+		for _, k := range ordered {
+			if shown >= 10 {
+				b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more", len(ordered)-shown)))
+				b.WriteString("\n")
+				break
+			}
+			v := fieldString(doc.Source, k)
+			if v == "" {
+				continue
+			}
+			b.WriteString(dimStyle.Render("  " + k + ": "))
+			b.WriteString(normalStyle.Render(truncate(v, max(width-len(k)-6, 8))))
+			b.WriteString("\n")
+			shown++
+		}
+		b.WriteString("\n")
+	}
+
 	b.WriteString(dimStyle.Render(strings.Repeat("─", max(width, 8))))
 	b.WriteString("\n\n")
 
-	b.WriteString(keyStyle.Render("Value"))
+	b.WriteString(keyStyle.Render("Source"))
 	b.WriteString("\n\n")
 
 	raw := doc.Raw
@@ -172,7 +404,7 @@ func (m Model) buildDocumentPreviewPanel(width int) string {
 		return b.String()
 	}
 
-	maxLines := max(m.Height-18, 5)
+	maxLines := max(m.Height-24, 4)
 	colored := colorizeJSON(raw)
 	lines := strings.Split(colored, "\n")
 	shown := 0
@@ -205,6 +437,11 @@ func (m Model) viewDocumentDetail() string {
 	meta.WriteString("\n")
 	meta.WriteString(keyStyle.Render("     ID: "))
 	meta.WriteString(normalStyle.Render(doc.ID))
+	if s := docSummary(doc); s != "" && s != doc.ID {
+		meta.WriteString("\n")
+		meta.WriteString(keyStyle.Render("Summary: "))
+		meta.WriteString(normalStyle.Render(truncate(s, 50)))
+	}
 	meta.WriteString("\n")
 	meta.WriteString(keyStyle.Render("  Score: "))
 	meta.WriteString(normalStyle.Render(fmt.Sprintf("%.4f", doc.Score)))
@@ -237,7 +474,7 @@ func (m Model) viewDocumentDetail() string {
 	box := valueBoxStyle.Width(boxWidth).Render(display.String())
 	b.WriteString(lipgloss.PlaceHorizontal(min(m.Width, boxWidth+4), lipgloss.Center, box))
 	b.WriteString("\n\n")
-	b.WriteString(helpStyle.Render("e:edit  d:delete  j/k:scroll  esc:back"))
+	b.WriteString(helpStyle.Render("e:edit  d:delete  j/k:scroll  y:copy  esc:back"))
 	return b.String()
 }
 
@@ -251,3 +488,5 @@ func detailBoxWidth(termWidth int) int {
 	}
 	return w
 }
+
+var _ = types.Document{}
