@@ -328,3 +328,67 @@ func TestConfigUpdateTLSPreserve(t *testing.T) {
 	}
 	_ = time.Now()
 }
+
+func TestConfigSavedQueriesAndBearerStrip(t *testing.T) {
+	cfg := newTestConfig(t)
+	conn, err := cfg.AddConnection(types.Connection{
+		Name: "local", Host: "localhost", Port: 9200,
+		Password: "secret", APIKey: "key", BearerToken: "bearer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded := reloadConfig(t, cfg)
+	list, err := reloaded.ListConnections()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list[0].Password != "" || list[0].APIKey != "" || list[0].BearerToken != "" {
+		t.Fatal("secrets should be stripped")
+	}
+
+	// Update preserves bearer when blank
+	cfg2 := newTestConfig(t)
+	c, err := cfg2.AddConnection(types.Connection{Name: "a", Host: "h", Port: 9200, BearerToken: "bt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BearerToken = ""
+	c.Name = "b"
+	updated, err := cfg2.UpdateConnection(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.BearerToken != "bt" || updated.Name != "b" {
+		t.Fatalf("%+v", updated)
+	}
+	_ = conn
+
+	q, err := cfg2.AddSavedQuery(types.SavedQuery{Name: "q1", Index: "i", Query: "*"})
+	if err != nil || q.Name != "q1" || q.Created.IsZero() {
+		t.Fatalf("%+v %v", q, err)
+	}
+	if len(cfg2.ListSavedQueries()) != 1 {
+		t.Fatal("list")
+	}
+	q2, err := cfg2.AddSavedQuery(types.SavedQuery{Name: "q1", Index: "j", Query: "x"})
+	if err != nil || q2.Index != "j" {
+		t.Fatal(err)
+	}
+	if len(cfg2.ListSavedQueries()) != 1 {
+		t.Fatal("replace")
+	}
+	reloaded2 := reloadConfig(t, cfg2)
+	if len(reloaded2.ListSavedQueries()) != 1 || reloaded2.ListSavedQueries()[0].Query != "x" {
+		t.Fatal("persist")
+	}
+	if err := cfg2.DeleteSavedQuery("q1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg2.ListSavedQueries()) != 0 {
+		t.Fatal("deleted")
+	}
+	if err := cfg2.DeleteSavedQuery("missing"); err != nil {
+		t.Fatal(err)
+	}
+}

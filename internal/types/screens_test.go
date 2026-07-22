@@ -18,7 +18,7 @@ func TestScreenString(t *testing.T) {
 		}
 	}
 	// exercise all known screens once
-	for s := ScreenConnections; s <= ScreenCatAPI; s++ {
+	for s := ScreenConnections; s <= ScreenExplain; s++ {
 		if s.String() == "Unknown" {
 			t.Fatalf("screen %d should have a name", s)
 		}

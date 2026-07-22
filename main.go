@@ -134,8 +134,10 @@ func parseFlags(args []string) (conn *types.Connection, showVersion bool, doUpda
 	username := fs.String("user", "", "Username for basic auth")
 	password := fs.String("password", "", "Password for basic auth")
 	apiKey := fs.String("api-key", "", "API key authentication")
+	bearer := fs.String("bearer", "", "Bearer token authentication")
 	name := fs.String("name", "", "Connection display name")
 	flavor := fs.String("flavor", "auto", "Engine flavor: auto, elasticsearch, opensearch")
+	readOnly := fs.Bool("read-only", false, "Read-only mode (block mutations)")
 	tls := fs.Bool("tls", false, "Enable TLS/SSL")
 	tlsCert := fs.String("tls-cert", "", "TLS client certificate file")
 	tlsKey := fs.String("tls-key", "", "TLS client private key file")
@@ -183,7 +185,7 @@ func parseFlags(args []string) (conn *types.Connection, showVersion bool, doUpda
 	}
 
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "password" || f.Name == "a" || f.Name == "api-key" {
+		if f.Name == "password" || f.Name == "a" || f.Name == "api-key" || f.Name == "bearer" {
 			fmt.Fprintln(os.Stderr, "Warning: Passing secrets on the command line exposes them in the process list. Prefer the interactive connection form.")
 		}
 	})
@@ -196,13 +198,15 @@ func parseFlags(args []string) (conn *types.Connection, showVersion bool, doUpda
 	}
 
 	conn = &types.Connection{
-		Host:     *host,
-		Port:     *port,
-		Username: *username,
-		Password: *password,
-		APIKey:   *apiKey,
-		Flavor:   fl,
-		UseTLS:   *tls,
+		Host:        *host,
+		Port:        *port,
+		Username:    *username,
+		Password:    *password,
+		APIKey:      *apiKey,
+		BearerToken: *bearer,
+		Flavor:      fl,
+		UseTLS:      *tls,
+		ReadOnly:    *readOnly,
 	}
 	if *name != "" {
 		conn.Name = *name

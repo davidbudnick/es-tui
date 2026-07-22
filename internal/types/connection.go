@@ -19,20 +19,22 @@ const (
 
 // Connection stores Elasticsearch/OpenSearch connection details.
 type Connection struct {
-	ID        int64      `json:"id"`
-	Name      string     `json:"name"`
-	Host      string     `json:"host"`
-	Port      int        `json:"port"`
-	Username  string     `json:"username"`
-	Password  string     `json:"password,omitempty"` // #nosec G117 -- stored in local user config.
-	APIKey    string     `json:"api_key,omitempty"`  // #nosec G117 -- stored in local user config.
-	Flavor    Flavor     `json:"flavor,omitempty"`
-	Group     string     `json:"group,omitempty"`
-	Color     string     `json:"color,omitempty"`
-	UseTLS    bool       `json:"use_tls,omitempty"`
-	TLSConfig *TLSConfig `json:"tls_config,omitempty"`
-	Created   time.Time  `json:"created_at"`
-	Updated   time.Time  `json:"updated_at"`
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Host        string     `json:"host"`
+	Port        int        `json:"port"`
+	Username    string     `json:"username"`
+	Password    string     `json:"password,omitempty"`     // #nosec G117 -- stored in local user config.
+	APIKey      string     `json:"api_key,omitempty"`      // #nosec G117 -- stored in local user config.
+	BearerToken string     `json:"bearer_token,omitempty"` // #nosec G117 -- stored in local user config.
+	Flavor      Flavor     `json:"flavor,omitempty"`
+	Group       string     `json:"group,omitempty"`
+	Color       string     `json:"color,omitempty"`
+	UseTLS      bool       `json:"use_tls,omitempty"`
+	ReadOnly    bool       `json:"read_only,omitempty"`
+	TLSConfig   *TLSConfig `json:"tls_config,omitempty"`
+	Created     time.Time  `json:"created_at"`
+	Updated     time.Time  `json:"updated_at"`
 }
 
 // Address returns host:port.

@@ -1,122 +1,112 @@
 # es-tui feature roadmap
 
-Goal: the best keyboard-first TUI for Elasticsearch **and** OpenSearch — redis-tui UX density + ktsearch admin power + live monitoring.
+Goal: the best keyboard-first TUI for Elasticsearch **and** OpenSearch.
 
-## Status legend
+## Status
 
 | Mark | Meaning |
 | --- | --- |
 | ✅ | Implemented |
-| 🔨 | Partial / improving |
-| ⬜ | Planned |
+| 🔨 | Partial |
+| ⬜ | Planned (next) |
 
----
-
-## 1. Connection & profiles
+### 1. Connection & profiles
 
 | Feature | Status |
 | --- | --- |
-| Multiple saved profiles | ✅ |
-| Connection groups | ✅ (config) |
-| Basic auth + API key | ✅ |
-| Bearer token | ⬜ |
-| AWS SigV4 | ⬜ |
+| Multiple saved profiles + groups | ✅ |
+| Basic auth + API key + **Bearer token** | ✅ |
 | TLS (CA / cert / skip-verify) | ✅ |
-| SSH tunneling | ⬜ |
 | Auto-detect ES vs OpenSearch + version | ✅ |
-| CLI quick-connect flags | ✅ |
-| Interactive profile switcher | ✅ |
-| Read-only mode | ⬜ |
+| CLI quick-connect (+ `--bearer`, `--read-only`) | ✅ |
+| **Read-only mode** (blocks mutations) | ✅ |
 | Health / test on connect | ✅ |
-| Passwords/API keys stripped from disk | ✅ |
+| Secrets stripped from disk (password, api key, bearer) | ✅ |
+| AWS SigV4 / SSH tunnel | ⬜ |
 
-## 2. Cluster overview & live monitoring
-
-| Feature | Status |
-| --- | --- |
-| Cluster health (green/yellow/red) | ✅ |
-| Node count / shard summary | ✅ |
-| Live metrics dashboard + auto-refresh | 🔨 |
-| Node list: roles, CPU, heap, disk | 🔨 |
-| Search/indexing rates + latency | 🔨 |
-| JVM / GC / network charts | ⬜ |
-| ASCII charts | 🔨 |
-| Color-coded health everywhere | 🔨 |
-
-## 3. Indices management
+### 2. Cluster overview & monitoring
 
 | Feature | Status |
 | --- | --- |
-| Filterable index list + preview pane | ✅ |
-| Columns: health, docs, size, shards, status | ✅ |
-| Create / delete | ✅ |
-| Open / close / refresh | ✅ |
-| Force-merge | ✅ |
-| Settings / mappings JSON view | ✅ |
-| Aliases | ✅ |
-| Templates | ✅ |
-| Data streams | ⬜ |
-| Reindex wizard | ⬜ |
-| Fuzzy / filter | 🔨 |
+| Cluster health + status bar chip | ✅ |
+| Nodes table (roles, heap, CPU, disk) | ✅ |
+| Live metrics + auto-refresh + sparkline | ✅ |
+| Disk **allocation** table | ✅ |
+| Tasks list + cancel | ✅ |
+| Plugins list | ✅ |
+| Cluster settings (JSON) | ✅ |
+| Advanced JVM/GC charts | 🔨 |
 
-## 4. Documents & search
+### 3. Indices
 
 | Feature | Status |
 | --- | --- |
-| Paginated document browser + preview | ✅ |
-| JSON viewer + syntax highlight | ✅ |
-| CRUD (get/index/delete) | ✅ |
-| Bulk delete-by-query | ✅ |
-| Query-string search | ✅ |
-| Raw JSON Query DSL | ✅ |
-| Split-pane search results + preview | ✅ |
-| Saved queries / history | 🔨 history in-session |
-| Pagination (from/size) | ✅ |
-| Aggregations / explain / highlight | ⬜ |
-| Export results | ⬜ |
+| Split-pane list + preview, blue selection | ✅ |
+| Create / delete / open / close / refresh / force-merge | ✅ |
+| Settings + mappings JSON | ✅ |
+| Aliases + templates | ✅ |
+| **Data streams** | ✅ |
+| **Reindex** (async task) | ✅ |
+| **Count** API | ✅ |
+| Filter pattern | ✅ |
 
-## 5. Nodes, shards & allocation
+### 4. Documents & search
 
 | Feature | Status |
 | --- | --- |
-| Cat nodes / shards / aliases | ✅ |
-| Cat API explorer | ✅ |
-| Allocation view | ⬜ |
-| Shard balance analysis | ⬜ |
-| Reroute helpers | ⬜ |
+| Split-pane browser + JSON highlight | ✅ |
+| CRUD + bulk delete-by-query | ✅ |
+| Query-string + raw JSON DSL | ✅ |
+| Split-pane search + field preview | ✅ |
+| Pagination n/p | ✅ |
+| Query history (session) + **saved queries (disk)** | ✅ |
+| **Explain** API | ✅ |
+| **Export** NDJSON | ✅ |
+| Copy JSON (`y`) | ✅ |
+| Aggregations builder | ⬜ |
 
-## 6. Advanced operations
-
-| Feature | Status |
-| --- | --- |
-| ILM policies | ⬜ |
-| Snapshots | ⬜ |
-| Task list / cancel | ⬜ |
-| Dump / restore NDJSON | ⬜ |
-| Cluster settings edit | ⬜ |
-| Plugins list | ⬜ |
-
-## 7. UX polish
+### 5. Nodes / shards / cat
 
 | Feature | Status |
 | --- | --- |
-| Vim-style navigation | ✅ |
-| Split panes (indices/docs/search) | 🔨 |
-| Filtering in lists | 🔨 |
-| Copy to clipboard | ✅ |
+| Cat nodes / shards / aliases / cat explorer | ✅ |
+| Allocation | ✅ |
+| Reroute wizard | ⬜ |
+
+### 6. Advanced
+
+| Feature | Status |
+| --- | --- |
+| Snapshots (list by repo) | ✅ |
+| Tasks + cancel | ✅ |
+| Plugins | ✅ |
+| Cluster settings view | ✅ |
+| ILM write policies | ⬜ |
+| Snapshot create/restore UI | ⬜ |
+
+### 7. UX
+
+| Feature | Status |
+| --- | --- |
+| Vim nav, help, confirmations | ✅ |
+| Split panes (indices/docs/search) | ✅ |
+| **Command palette (`:`)** | ✅ |
+| Clipboard | ✅ |
+| Status: Connected · flavor · RO · health | ✅ |
 | Themes | ⬜ |
-| Help (`?`) | ✅ |
-| Confirmation on destructive actions | ✅ |
-| Status bar connection + health | 🔨 |
-| Multi-profile switch | ✅ |
 
 ---
 
-## Phases
+## Keyboard (highlights)
 
-1. **MVP (current focus)** — connections, cluster health, index browser, documents, **great search**, CRUD  
-2. **v1** — nodes/shards density, open/close/refresh/forcemerge, mappings polish, clipboard, pagination  
-3. **v1.5** — query history/saved queries, reindex, bulk select, aliases write  
-4. **Later** — ILM, snapshots, data streams, SigV4, SSH, themes  
+| Context | Keys |
+| --- | --- |
+| Global (connected) | `:` palette · `?` help · `q` back |
+| Indices | `/` search · `O/X` open/close · `u` refresh · `M` merge · `I` reindex · `V` alloc · `W` tasks · `E` data streams · `U` settings · `Z` snapshots · `Y` saved queries · `Q` export · `#` count |
+| Search | `enter` run · `j/k` hits · `n/p` page · `y` copy · `S` save query · `x` explain · `#` count |
+| Documents | `/` search · `f` inline filter · `y` copy · `n/p` page |
+| Palette | type to filter · `enter` run |
 
-This document is the product checklist. Implementation tracks these boxes, not a rewrite for its own sake.
+---
+
+Still planned (SigV4, SSH, ILM editors, snapshot create/restore, themes) — solid daily admin surface is in place.

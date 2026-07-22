@@ -281,3 +281,137 @@ func TestCommandsAll(t *testing.T) {
 		t.Fatal(msg)
 	}
 }
+
+func TestCommandsNewOps(t *testing.T) {
+	c, mock, _ := newTestCmds(t)
+	mock.CountVal = 7
+	mock.ExplainResult = types.ExplainResult{Matched: true, Explanation: "x"}
+	mock.ReindexTask = "task-1"
+	mock.Allocation = []types.AllocationInfo{{Node: "n"}}
+	mock.Tasks = []types.TaskInfo{{ID: "t1"}}
+	mock.Plugins = []types.PluginInfo{{Name: "p"}}
+	mock.ClusterSettings = `{}`
+	mock.DataStreams = []types.DataStreamInfo{{Name: "ds"}}
+	mock.Snapshots = []types.SnapshotInfo{{Snapshot: "s"}}
+	mock.ExportDocsVal = []types.Document{{ID: "1"}}
+
+	msg := c.Count("products", "")()
+	if m, ok := msg.(types.CountMsg); !ok || m.Err != nil || m.Count != 7 {
+		t.Fatal(msg)
+	}
+	msg = c.Explain("products", "1", "*")()
+	if m, ok := msg.(types.ExplainLoadedMsg); !ok || m.Err != nil || !m.Result.Matched {
+		t.Fatal(msg)
+	}
+	msg = c.Reindex(`{}`)()
+	if m, ok := msg.(types.ReindexMsg); !ok || m.Err != nil || m.Task != "task-1" {
+		t.Fatal(msg)
+	}
+	msg = c.LoadAllocation()()
+	if m, ok := msg.(types.AllocationLoadedMsg); !ok || m.Err != nil || len(m.Allocation) != 1 {
+		t.Fatal(msg)
+	}
+	msg = c.LoadTasks()()
+	if m, ok := msg.(types.TasksLoadedMsg); !ok || m.Err != nil || len(m.Tasks) != 1 {
+		t.Fatal(msg)
+	}
+	msg = c.CancelTask("t1")()
+	if m, ok := msg.(types.TasksLoadedMsg); !ok || m.Err != nil {
+		t.Fatal(msg)
+	}
+	msg = c.LoadPlugins()()
+	if m, ok := msg.(types.PluginsLoadedMsg); !ok || m.Err != nil || len(m.Plugins) != 1 {
+		t.Fatal(msg)
+	}
+	msg = c.LoadClusterSettings()()
+	if m, ok := msg.(types.ClusterSettingsLoadedMsg); !ok || m.Err != nil {
+		t.Fatal(msg)
+	}
+	msg = c.LoadDataStreams()()
+	if m, ok := msg.(types.DataStreamsLoadedMsg); !ok || m.Err != nil || len(m.DataStreams) != 1 {
+		t.Fatal(msg)
+	}
+	msg = c.LoadSnapshots("repo")()
+	if m, ok := msg.(types.SnapshotsLoadedMsg); !ok || m.Err != nil || len(m.Snapshots) != 1 {
+		t.Fatal(msg)
+	}
+	msg = c.ExportDocs("products", "", 10)()
+	if m, ok := msg.(types.ExportCompleteMsg); !ok || m.Err != nil || m.Count != 1 {
+		t.Fatal(msg)
+	}
+
+	msg = c.AddSavedQuery(types.SavedQuery{Name: "q1", Index: "products", Query: "*"})()
+	if m, ok := msg.(types.SavedQueryAddedMsg); !ok || m.Err != nil || m.Query.Name != "q1" {
+		t.Fatal(msg)
+	}
+	msg = c.LoadSavedQueries()()
+	if m, ok := msg.(types.SavedQueriesLoadedMsg); !ok || len(m.Queries) != 1 {
+		t.Fatal(msg)
+	}
+	msg = c.DeleteSavedQuery("q1")()
+	if m, ok := msg.(types.SavedQueryDeletedMsg); !ok || m.Err != nil {
+		t.Fatal(msg)
+	}
+
+	mock.ReadOnly = true
+	msg = c.CreateIndex("x", "")()
+	if m, ok := msg.(types.IndexCreatedMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.DeleteIndex("x")()
+	if m, ok := msg.(types.IndexDeletedMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.SaveDocument("i", "1", `{}`)()
+	if m, ok := msg.(types.DocumentSavedMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.DeleteDocument("i", "1")()
+	if m, ok := msg.(types.DocumentDeletedMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.BulkDelete("i", "*")()
+	if m, ok := msg.(types.BulkDeleteMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.RefreshIndex("i")()
+	if m, ok := msg.(types.IndicesLoadedMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.RefreshIndexOnly("i")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.OpenIndex("i")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.CloseIndex("i")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.ForceMerge("i")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.Reindex(`{}`)()
+	if m, ok := msg.(types.ReindexMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	msg = c.CancelTask("t1")()
+	if m, ok := msg.(types.TasksLoadedMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+
+	mock.ReadOnly = false
+	mock.ExportDocsErr = errors.New("export fail")
+	msg = c.ExportDocs("i", "", 1)()
+	if m, ok := msg.(types.ExportCompleteMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	mock.CancelTaskErr = errors.New("cancel fail")
+	msg = c.CancelTask("t1")()
+	if m, ok := msg.(types.TasksLoadedMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+}

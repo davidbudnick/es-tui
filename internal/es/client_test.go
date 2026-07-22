@@ -623,3 +623,263 @@ func TestParseSearchResultAndGetIndexSingle(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+func TestClientNewMethods(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/":
+			if auth := r.Header.Get("Authorization"); auth != "" && !strings.HasPrefix(auth, "Bearer ") && !strings.HasPrefix(auth, "ApiKey ") && !strings.HasPrefix(auth, "Basic ") {
+				http.Error(w, "bad auth", 401)
+				return
+			}
+			rootOK(w, r)
+		case strings.HasSuffix(r.URL.Path, "/_count"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"count": 42})
+		case strings.Contains(r.URL.Path, "/_explain/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"matched":     true,
+				"explanation": map[string]any{"value": 1.0, "description": "match"},
+			})
+		case r.URL.Path == "/_reindex":
+			_ = json.NewEncoder(w).Encode(map[string]any{"task": "node:123"})
+		case strings.HasPrefix(r.URL.Path, "/_cat/allocation"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"shards": "5", "disk.indices": "1b", "disk.used": "2b", "disk.avail": "3b",
+				"disk.total": "5b", "disk.percent": "40", "host": "h", "ip": "1.1.1.1", "node": "n1",
+			}})
+		case r.URL.Path == "/_tasks":
+			if strings.HasSuffix(r.URL.Path, "/_cancel") {
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"nodes": map[string]any{
+					"nodeA": map[string]any{
+						"tasks": map[string]any{
+							"nodeA:1": map[string]any{
+								"action": "indices:data/write/reindex", "type": "transport",
+								"start_time_in_millis": 1, "running_time_in_nanos": 2,
+								"cancellable": true, "node": "nodeA", "description": "reindex",
+							},
+						},
+					},
+				},
+			})
+		case strings.HasSuffix(r.URL.Path, "/_cancel"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": map[string]any{}})
+		case strings.HasPrefix(r.URL.Path, "/_cat/plugins"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"name": "n1", "component": "analysis-icu", "version": "8.0",
+			}})
+		case r.URL.Path == "/_cluster/settings":
+			_, _ = w.Write([]byte(`{"persistent":{}}`))
+		case r.URL.Path == "/_data_stream":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data_streams": []map[string]any{{
+					"name": "logs", "timestamp_field": map[string]any{"name": "@timestamp"},
+					"indices":    []any{map[string]any{"index_name": "logs-0001"}},
+					"generation": 1, "status": "GREEN", "template": "logs-tpl",
+				}},
+			})
+		case r.URL.Path == "/_snapshot":
+			_ = json.NewEncoder(w).Encode(map[string]any{"repo1": map[string]any{"type": "fs"}})
+		case r.URL.Path == "/_snapshot/repo1/_all":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"snapshots": []map[string]any{{
+					"snapshot": "snap1", "repository": "repo1", "state": "SUCCESS",
+					"start_time": "t1", "end_time": "t2",
+					"indices": []any{"idx1", "idx2"},
+				}},
+			})
+		case strings.Contains(r.URL.Path, "/_search"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"took": 1, "hits": map[string]any{
+					"total": map[string]any{"value": 1, "relation": "eq"},
+					"hits": []any{map[string]any{
+						"_index": "products", "_id": "1", "_score": 1.0,
+						"_source": map[string]any{"name": "a"},
+					}},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	// Bearer auth connect
+	u := strings.TrimPrefix(srv.URL, "http://")
+	host, portStr, _ := strings.Cut(u, ":")
+	port := 0
+	for _, ch := range portStr {
+		port = port*10 + int(ch-'0')
+	}
+	c := NewClient()
+	if err := c.Connect(types.Connection{Host: host, Port: port, BearerToken: "tok", ReadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !c.IsReadOnly() {
+		t.Fatal("expected read-only")
+	}
+
+	n, err := c.Count("products", "")
+	if err != nil || n != 42 {
+		t.Fatalf("count: %v %d", err, n)
+	}
+	n, err = c.Count("products", "name:a")
+	if err != nil || n != 42 {
+		t.Fatal(err)
+	}
+	n, err = c.Count("products", `{"query":{"match_all":{}}}`)
+	if err != nil || n != 42 {
+		t.Fatal(err)
+	}
+
+	er, err := c.Explain("products", "1", "name:a")
+	if err != nil || !er.Matched || er.Explanation == "" {
+		t.Fatalf("explain: %+v %v", er, err)
+	}
+	er, err = c.Explain("products", "1", "")
+	if err != nil || !er.Matched {
+		t.Fatal(err)
+	}
+	er, err = c.Explain("products", "1", `{"match_all":{}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := c.Reindex(`{"source":{"index":"a"},"dest":{"index":"b"}}`)
+	if err != nil || task != "node:123" {
+		t.Fatalf("reindex: %q %v", task, err)
+	}
+
+	alloc, err := c.ListAllocation()
+	if err != nil || len(alloc) != 1 || alloc[0].Node != "n1" {
+		t.Fatalf("alloc: %+v %v", alloc, err)
+	}
+
+	tasks, err := c.ListTasks()
+	if err != nil || len(tasks) != 1 || tasks[0].ID != "nodeA:1" {
+		t.Fatalf("tasks: %+v %v", tasks, err)
+	}
+	if err := c.CancelTask("nodeA:1"); err != nil {
+		t.Fatal(err)
+	}
+
+	plugins, err := c.ListPlugins()
+	if err != nil || len(plugins) != 1 || plugins[0].Component != "analysis-icu" {
+		t.Fatalf("plugins: %+v %v", plugins, err)
+	}
+
+	settings, err := c.GetClusterSettings()
+	if err != nil || settings == "" {
+		t.Fatal(err)
+	}
+
+	streams, err := c.ListDataStreams()
+	if err != nil || len(streams) != 1 || streams[0].Name != "logs" || streams[0].TimestampField != "@timestamp" {
+		t.Fatalf("streams: %+v %v", streams, err)
+	}
+
+	snaps, err := c.ListSnapshots("")
+	if err != nil || len(snaps) != 1 || snaps[0].Snapshot != "snap1" {
+		t.Fatalf("snaps: %+v %v", snaps, err)
+	}
+	snaps, err = c.ListSnapshots("repo1")
+	if err != nil || len(snaps) != 1 {
+		t.Fatal(err)
+	}
+
+	docs, err := c.ExportDocs("products", "", 10)
+	if err != nil || len(docs) != 1 {
+		t.Fatalf("export: %+v %v", docs, err)
+	}
+	docs, err = c.ExportDocs("products", "", 10000)
+	if err != nil || len(docs) != 1 {
+		t.Fatal(err)
+	}
+
+	if err := c.Disconnect(); err != nil {
+		t.Fatal(err)
+	}
+	if c.IsReadOnly() {
+		t.Fatal("read-only after disconnect")
+	}
+}
+
+func TestListTasksFlatAndDataStream404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			rootOK(w, r)
+		case "/_tasks":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tasks": []any{map[string]any{
+					"id": "t1", "action": "a", "type": "t", "node": "n",
+				}},
+			})
+		case "/_data_stream":
+			http.Error(w, "no", 404)
+		case "/_snapshot":
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c := connectToServer(t, srv, types.FlavorAuto)
+	tasks, err := c.ListTasks()
+	if err != nil || len(tasks) != 1 || tasks[0].ID != "t1" {
+		t.Fatalf("%+v %v", tasks, err)
+	}
+	streams, err := c.ListDataStreams()
+	if err != nil || len(streams) != 0 {
+		t.Fatalf("%+v %v", streams, err)
+	}
+	snaps, err := c.ListSnapshots("")
+	if err != nil || len(snaps) != 0 {
+		t.Fatalf("%+v %v", snaps, err)
+	}
+}
+
+func TestBearerAuthPriority(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		rootOK(w, r)
+	}))
+	defer srv.Close()
+	u := strings.TrimPrefix(srv.URL, "http://")
+	host, portStr, _ := strings.Cut(u, ":")
+	port := 0
+	for _, ch := range portStr {
+		port = port*10 + int(ch-'0')
+	}
+
+	// API key wins over bearer
+	c := NewClient()
+	if err := c.Connect(types.Connection{Host: host, Port: port, APIKey: "k", BearerToken: "b", Username: "u", Password: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(gotAuth, "ApiKey ") {
+		t.Fatalf("auth %q", gotAuth)
+	}
+
+	// Bearer over basic
+	c2 := NewClient()
+	if err := c2.Connect(types.Connection{Host: host, Port: port, BearerToken: "btok", Username: "u", Password: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "Bearer btok" {
+		t.Fatalf("auth %q", gotAuth)
+	}
+
+	// TestConnection with bearer
+	_, _, err := NewClient().TestConnection(types.Connection{Host: host, Port: port, BearerToken: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "Bearer t" {
+		t.Fatalf("test auth %q", gotAuth)
+	}
+}

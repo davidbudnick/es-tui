@@ -14,6 +14,9 @@ import (
 
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if nm, cmd, ok := m.handleAdminMessages(msg); ok {
+		return nm, cmd
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
@@ -105,12 +108,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.Flavor == "" && m.Cmds != nil {
 			m.Flavor = m.Cmds.ES().Flavor()
 		}
+		if m.Cmds != nil {
+			m.ReadOnly = m.Cmds.ES().IsReadOnly()
+		}
+		if m.CurrentConn != nil {
+			m.ReadOnly = m.CurrentConn.ReadOnly
+		}
 		m.ConnectionError = ""
 		m.Err = nil
 		m.Screen = types.ScreenIndices
-		m.StatusMsg = fmt.Sprintf("Connected to %s (%s)", msg.Info.ClusterName, msg.Info.Version.Number)
+		status := fmt.Sprintf("Connected to %s (%s)", msg.Info.ClusterName, msg.Info.Version.Number)
+		if m.ReadOnly {
+			status += " [read-only]"
+		}
+		m.StatusMsg = status
 		if m.Cmds != nil {
-			return m, m.Cmds.LoadIndices("*")
+			return m, tea.Batch(m.Cmds.LoadIndices("*"), m.Cmds.LoadClusterHealth())
 		}
 		return m, nil
 
@@ -118,6 +131,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.CurrentConn = nil
 		m.Indices = nil
 		m.Documents = nil
+		m.ReadOnly = false
 		m.Screen = types.ScreenConnections
 		m.StatusMsg = "Disconnected"
 		return m, nil
@@ -505,6 +519,21 @@ func (m Model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleRecentKeys(key)
 	case types.ScreenCatAPI:
 		return m.handleCatAPIKeys(key, msg)
+	case types.ScreenCommandPalette:
+		return m.handleCommandPaletteKeys(key, msg)
+	case types.ScreenReindex:
+		return m.handleReindexKeys(key, msg)
+	case types.ScreenExport:
+		return m.handleExportKeys(key, msg)
+	case types.ScreenTasks:
+		return m.handleTasksKeys(key)
+	case types.ScreenSavedQueries:
+		return m.handleSavedQueriesKeys(key)
+	case types.ScreenSnapshots:
+		return m.handleSnapshotsKeys(key, msg)
+	case types.ScreenAllocation, types.ScreenPlugins, types.ScreenDataStreams,
+		types.ScreenClusterSettings, types.ScreenExplain:
+		return m.handleSimpleBackKeys(key)
 	default:
 		if key == "q" || key == "esc" {
 			return m, tea.Quit
@@ -551,11 +580,17 @@ func (m Model) handleConnectionsKeys(key string) (tea.Model, tea.Cmd) {
 		m.ConnInputs[3].SetValue(conn.Username)
 		m.ConnInputs[4].SetValue(conn.Password)
 		m.ConnInputs[5].SetValue(conn.APIKey)
+		m.ConnInputs[6].SetValue(conn.BearerToken)
 		flavor := string(conn.Flavor)
 		if flavor == "" {
 			flavor = "auto"
 		}
-		m.ConnInputs[6].SetValue(flavor)
+		m.ConnInputs[7].SetValue(flavor)
+		if conn.ReadOnly {
+			m.ConnInputs[8].SetValue("true")
+		} else {
+			m.ConnInputs[8].SetValue("false")
+		}
 		m.ConnFocusIdx = 0
 		m.ConnInputs[0].Focus()
 	case "d", "delete", "backspace":
@@ -578,6 +613,7 @@ func (m Model) handleConnectionsKeys(key string) (tea.Model, tea.Cmd) {
 		}
 		conn := m.Connections[m.SelectedConnIdx]
 		m.CurrentConn = &conn
+		m.ReadOnly = conn.ReadOnly
 		m.Loading = true
 		m.ConnectionError = ""
 		return m, m.Cmds.Connect(conn)
@@ -585,6 +621,14 @@ func (m Model) handleConnectionsKeys(key string) (tea.Model, tea.Cmd) {
 		m.Screen = types.ScreenHelp
 	case "L":
 		m.Screen = types.ScreenLogs
+	case ":":
+		m.Screen = types.ScreenCommandPalette
+		m.PaletteItems = defaultPaletteItems()
+		m.PaletteIdx = 0
+		if m.Inputs != nil {
+			m.Inputs.PaletteInput.SetValue("")
+			m.Inputs.PaletteInput.Focus()
+		}
 	}
 	return m, nil
 }
@@ -644,7 +688,7 @@ func (m Model) connectionFromInputs() (types.Connection, error) {
 	if name == "" {
 		name = fmt.Sprintf("%s:%d", host, port)
 	}
-	flavor := types.Flavor(strings.ToLower(strings.TrimSpace(m.ConnInputs[6].Value())))
+	flavor := types.Flavor(strings.ToLower(strings.TrimSpace(m.ConnInputs[7].Value())))
 	switch flavor {
 	case types.FlavorElasticsearch, types.FlavorOpenSearch, types.FlavorAuto, "":
 	default:
@@ -653,14 +697,17 @@ func (m Model) connectionFromInputs() (types.Connection, error) {
 	if flavor == "" {
 		flavor = types.FlavorAuto
 	}
+	ro := strings.EqualFold(strings.TrimSpace(m.ConnInputs[8].Value()), "true")
 	return types.Connection{
-		Name:     name,
-		Host:     host,
-		Port:     port,
-		Username: strings.TrimSpace(m.ConnInputs[3].Value()),
-		Password: m.ConnInputs[4].Value(),
-		APIKey:   strings.TrimSpace(m.ConnInputs[5].Value()),
-		Flavor:   flavor,
+		Name:        name,
+		Host:        host,
+		Port:        port,
+		Username:    strings.TrimSpace(m.ConnInputs[3].Value()),
+		Password:    m.ConnInputs[4].Value(),
+		APIKey:      strings.TrimSpace(m.ConnInputs[5].Value()),
+		BearerToken: strings.TrimSpace(m.ConnInputs[6].Value()),
+		Flavor:      flavor,
+		ReadOnly:    ro,
 	}, nil
 }
 
@@ -854,6 +901,62 @@ func (m Model) handleIndicesKeys(key string, msg tea.KeyPressMsg) (tea.Model, te
 		m.Screen = types.ScreenHelp
 	case "L":
 		m.Screen = types.ScreenLogs
+	case ":":
+		return m.openPalette()
+	case "P":
+		if m.Cmds != nil {
+			m.Loading = true
+			return m, m.Cmds.LoadPlugins()
+		}
+	case "V":
+		if m.Cmds != nil {
+			m.Loading = true
+			return m, m.Cmds.LoadAllocation()
+		}
+	case "W":
+		if m.Cmds != nil {
+			m.Loading = true
+			return m, m.Cmds.LoadTasks()
+		}
+	case "E":
+		if m.Cmds != nil {
+			m.Loading = true
+			return m, m.Cmds.LoadDataStreams()
+		}
+	case "U":
+		if m.Cmds != nil {
+			m.Loading = true
+			return m, m.Cmds.LoadClusterSettings()
+		}
+	case "Z":
+		m.Screen = types.ScreenSnapshots
+		if m.Inputs != nil {
+			m.Inputs.SnapshotRepo.Focus()
+		}
+	case "I":
+		m.Screen = types.ScreenReindex
+		m.ReindexFocus = 0
+		if m.Inputs != nil {
+			if len(m.Indices) > 0 {
+				m.Inputs.ReindexSrcInput.SetValue(m.Indices[m.SelectedIndexIdx].Name)
+			}
+			m.Inputs.ReindexSrcInput.Focus()
+		}
+	case "Y":
+		if m.Cmds != nil {
+			return m, m.Cmds.LoadSavedQueries()
+		}
+	case "#":
+		if len(m.Indices) > 0 && m.Cmds != nil {
+			m.Loading = true
+			return m, m.Cmds.Count(m.Indices[m.SelectedIndexIdx].Name, "")
+		}
+	case "Q":
+		m.Screen = types.ScreenExport
+		if m.Inputs != nil {
+			m.Inputs.ExportInput.SetValue(fmt.Sprintf("/tmp/es-tui-export-%d.ndjson", time.Now().Unix()))
+			m.Inputs.ExportInput.Focus()
+		}
 	}
 	return m, nil
 }
@@ -1223,6 +1326,50 @@ func (m Model) handleSearchKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea
 			q = m.Inputs.SearchInput.Value()
 		}
 		return m, m.Cmds.Search(m.SearchIndex, q, m.SearchFrom, pageSize)
+	case "S":
+		// save current query
+		if m.Cmds == nil {
+			return m, nil
+		}
+		q := m.SearchQuery
+		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
+			q = m.Inputs.SearchInput.Value()
+		}
+		if strings.TrimSpace(q) == "" {
+			m.Err = fmt.Errorf("nothing to save")
+			return m, nil
+		}
+		name := fmt.Sprintf("q-%d", time.Now().Unix()%100000)
+		return m, m.Cmds.AddSavedQuery(types.SavedQuery{
+			Name:  name,
+			Index: m.SearchIndex,
+			Query: q,
+		})
+	case "#":
+		if m.Cmds == nil {
+			return m, nil
+		}
+		q := m.SearchQuery
+		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
+			q = m.Inputs.SearchInput.Value()
+		}
+		m.Loading = true
+		return m, m.Cmds.Count(m.SearchIndex, q)
+	case "x":
+		// explain selected hit
+		hits := searchHits(m)
+		if len(hits) == 0 || m.Cmds == nil {
+			return m, nil
+		}
+		doc := hits[clamp(m.SelectedDocIdx, 0, len(hits)-1)]
+		q := m.SearchQuery
+		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
+			q = m.Inputs.SearchInput.Value()
+		}
+		m.Loading = true
+		return m, m.Cmds.Explain(doc.Index, doc.ID, q)
+	case ":":
+		return m.openPalette()
 	}
 	return m, nil
 }
@@ -1502,7 +1649,10 @@ func (m Model) goBack() (tea.Model, tea.Cmd) {
 		types.ScreenAliases, types.ScreenIndexTemplates, types.ScreenFavorites,
 		types.ScreenRecentIndices, types.ScreenCatAPI, types.ScreenLiveMetrics,
 		types.ScreenSearch, types.ScreenIndexCreate, types.ScreenIndexSettings,
-		types.ScreenIndexMappings:
+		types.ScreenIndexMappings, types.ScreenCommandPalette, types.ScreenAllocation,
+		types.ScreenTasks, types.ScreenPlugins, types.ScreenDataStreams,
+		types.ScreenClusterSettings, types.ScreenSnapshots, types.ScreenReindex,
+		types.ScreenExport, types.ScreenSavedQueries, types.ScreenExplain:
 		if m.CurrentConn != nil {
 			m.Screen = types.ScreenIndices
 		} else {

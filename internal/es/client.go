@@ -26,6 +26,7 @@ type Client struct {
 	user    string
 	pass    string
 	apiKey  string
+	bearer  string
 	flavor  types.Flavor
 	conn    *types.Connection
 	ctx     context.Context
@@ -56,6 +57,7 @@ func (c *Client) Connect(conn types.Connection) error {
 	c.user = conn.Username
 	c.pass = conn.Password
 	c.apiKey = conn.APIKey
+	c.bearer = conn.BearerToken
 	c.conn = &conn
 	c.flavor = conn.Flavor
 
@@ -64,6 +66,10 @@ func (c *Client) Connect(conn types.Connection) error {
 		c.http = &http.Client{Timeout: 30 * time.Second}
 		c.baseURL = ""
 		c.conn = nil
+		c.user = ""
+		c.pass = ""
+		c.apiKey = ""
+		c.bearer = ""
 		return fmt.Errorf("connect: %w", err)
 	}
 
@@ -82,9 +88,17 @@ func (c *Client) Disconnect() error {
 	c.user = ""
 	c.pass = ""
 	c.apiKey = ""
+	c.bearer = ""
 	c.flavor = ""
 	c.http = &http.Client{Timeout: 30 * time.Second}
 	return nil
+}
+
+// IsReadOnly reports whether the active connection is read-only.
+func (c *Client) IsReadOnly() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.conn != nil && c.conn.ReadOnly
 }
 
 // IsConnected reports whether the client has an active connection.
@@ -114,6 +128,7 @@ func (c *Client) TestConnection(conn types.Connection) (time.Duration, types.Clu
 		user:    conn.Username,
 		pass:    conn.Password,
 		apiKey:  conn.APIKey,
+		bearer:  conn.BearerToken,
 		ctx:     context.Background(),
 	}
 
@@ -167,6 +182,7 @@ func (c *Client) do(method, path string, body any) ([]byte, int, error) {
 	user := c.user
 	pass := c.pass
 	apiKey := c.apiKey
+	bearer := c.bearer
 	ctx := c.ctx
 	c.mu.RUnlock()
 
@@ -197,12 +213,7 @@ func (c *Client) do(method, path string, body any) ([]byte, int, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-
-	if apiKey != "" {
-		req.Header.Set("Authorization", "ApiKey "+apiKey)
-	} else if user != "" {
-		req.SetBasicAuth(user, pass)
-	}
+	setAuth(req, apiKey, bearer, user, pass)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -219,6 +230,16 @@ func (c *Client) do(method, path string, body any) ([]byte, int, error) {
 		return data, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncateErr(data))
 	}
 	return data, resp.StatusCode, nil
+}
+
+func setAuth(req *http.Request, apiKey, bearer, user, pass string) {
+	if apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+apiKey)
+	} else if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	} else if user != "" {
+		req.SetBasicAuth(user, pass)
+	}
 }
 
 func truncateErr(data []byte) string {
@@ -293,11 +314,7 @@ func (c *Client) doUnlocked(method, path string, body any) ([]byte, int, error) 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "ApiKey "+c.apiKey)
-	} else if c.user != "" {
-		req.SetBasicAuth(c.user, c.pass)
-	}
+	setAuth(req, c.apiKey, c.bearer, c.user, c.pass)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -826,6 +843,335 @@ func (c *Client) Cat(endpoint string) (string, error) {
 		return pretty.String(), nil
 	}
 	return string(data), nil
+}
+
+// Count returns the number of documents matching a query.
+func (c *Client) Count(index, query string) (int64, error) {
+	path := "/_count"
+	if index != "" {
+		path = "/" + url.PathEscape(index) + "/_count"
+	}
+	var body any
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		body = map[string]any{"query": map[string]any{"match_all": map[string]any{}}}
+	} else if strings.HasPrefix(trimmed, "{") {
+		body = trimmed
+	} else {
+		body = map[string]any{
+			"query": map[string]any{
+				"query_string": map[string]any{"query": trimmed},
+			},
+		}
+	}
+	data, _, err := c.do("POST", path, body)
+	if err != nil {
+		return 0, err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return 0, err
+	}
+	return int64Val(raw["count"]), nil
+}
+
+// Explain explains why a document matches a query.
+func (c *Client) Explain(index, id, query string) (types.ExplainResult, error) {
+	path := "/" + url.PathEscape(index) + "/_explain/" + url.PathEscape(id)
+	var body any
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		body = map[string]any{"query": map[string]any{"match_all": map[string]any{}}}
+	} else if strings.HasPrefix(trimmed, "{") {
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+			return types.ExplainResult{}, fmt.Errorf("invalid query JSON: %w", err)
+		}
+		if _, ok := parsed["query"]; ok {
+			body = parsed
+		} else {
+			body = map[string]any{"query": parsed}
+		}
+	} else {
+		body = map[string]any{
+			"query": map[string]any{
+				"query_string": map[string]any{"query": trimmed},
+			},
+		}
+	}
+	data, _, err := c.do("POST", path, body)
+	if err != nil {
+		return types.ExplainResult{}, err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return types.ExplainResult{}, err
+	}
+	result := types.ExplainResult{
+		Matched: boolVal(raw["matched"]),
+		Raw:     string(data),
+	}
+	if expl, ok := raw["explanation"]; ok {
+		if b, err := json.MarshalIndent(expl, "", "  "); err == nil {
+			result.Explanation = string(b)
+		} else {
+			result.Explanation = fmt.Sprint(expl)
+		}
+	}
+	return result, nil
+}
+
+// Reindex starts an async reindex and returns the task ID.
+func (c *Client) Reindex(body string) (string, error) {
+	data, _, err := c.do("POST", "/_reindex?wait_for_completion=false", body)
+	if err != nil {
+		return "", err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return "", err
+	}
+	return str(raw["task"]), nil
+}
+
+// ListAllocation returns disk allocation via _cat/allocation.
+func (c *Client) ListAllocation() ([]types.AllocationInfo, error) {
+	data, _, err := c.do("GET", "/_cat/allocation?format=json", nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
+	out := make([]types.AllocationInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, types.AllocationInfo{
+			Shards:      str(r["shards"]),
+			DiskIndices: str(r["disk.indices"]),
+			DiskUsed:    str(r["disk.used"]),
+			DiskAvail:   str(r["disk.avail"]),
+			DiskTotal:   str(r["disk.total"]),
+			DiskPercent: str(r["disk.percent"]),
+			Host:        str(r["host"]),
+			IP:          str(r["ip"]),
+			Node:        str(r["node"]),
+		})
+	}
+	return out, nil
+}
+
+// ListTasks returns cluster tasks.
+func (c *Client) ListTasks() ([]types.TaskInfo, error) {
+	data, _, err := c.do("GET", "/_tasks?detailed=true", nil)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	var tasks []types.TaskInfo
+	if nodes, ok := raw["nodes"].(map[string]any); ok {
+		for nodeID, nv := range nodes {
+			nm, ok := nv.(map[string]any)
+			if !ok {
+				continue
+			}
+			nodeTasks, _ := nm["tasks"].(map[string]any)
+			for taskID, tv := range nodeTasks {
+				tm, ok := tv.(map[string]any)
+				if !ok {
+					continue
+				}
+				tasks = append(tasks, types.TaskInfo{
+					ID:          taskID,
+					Action:      str(tm["action"]),
+					Type:        str(tm["type"]),
+					StartTime:   str(tm["start_time_in_millis"]),
+					RunningTime: str(tm["running_time_in_nanos"]),
+					Cancellable: str(tm["cancellable"]),
+					Node:        firstNonEmpty(str(tm["node"]), nodeID),
+					Description: str(tm["description"]),
+				})
+			}
+		}
+	}
+	if len(tasks) == 0 {
+		if arr, ok := raw["tasks"].([]any); ok {
+			for _, item := range arr {
+				tm, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				tasks = append(tasks, types.TaskInfo{
+					ID:          str(tm["id"]),
+					Action:      str(tm["action"]),
+					Type:        str(tm["type"]),
+					StartTime:   str(tm["start_time_in_millis"]),
+					RunningTime: str(tm["running_time_in_nanos"]),
+					Cancellable: str(tm["cancellable"]),
+					Node:        str(tm["node"]),
+					Description: str(tm["description"]),
+				})
+			}
+		}
+	}
+	return tasks, nil
+}
+
+// CancelTask cancels a running task.
+func (c *Client) CancelTask(taskID string) error {
+	_, _, err := c.do("POST", "/_tasks/"+url.PathEscape(taskID)+"/_cancel", nil)
+	return err
+}
+
+// ListPlugins returns installed plugins via _cat/plugins.
+func (c *Client) ListPlugins() ([]types.PluginInfo, error) {
+	data, _, err := c.do("GET", "/_cat/plugins?format=json", nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
+	out := make([]types.PluginInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, types.PluginInfo{
+			Name:      str(r["name"]),
+			Component: str(r["component"]),
+			Version:   str(r["version"]),
+		})
+	}
+	return out, nil
+}
+
+// GetClusterSettings returns cluster settings as pretty JSON.
+func (c *Client) GetClusterSettings() (string, error) {
+	data, _, err := c.do("GET", "/_cluster/settings?include_defaults=true&pretty", nil)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// ListDataStreams returns data streams; empty slice on 404.
+func (c *Client) ListDataStreams() ([]types.DataStreamInfo, error) {
+	data, status, err := c.do("GET", "/_data_stream", nil)
+	if err != nil {
+		if status == 404 {
+			return []types.DataStreamInfo{}, nil
+		}
+		return nil, err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	var out []types.DataStreamInfo
+	if arr, ok := raw["data_streams"].([]any); ok {
+		for _, item := range arr {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			info := types.DataStreamInfo{
+				Name:       str(m["name"]),
+				Generation: str(m["generation"]),
+				Status:     str(m["status"]),
+				Template:   str(m["template"]),
+			}
+			if tf, ok := m["timestamp_field"].(map[string]any); ok {
+				info.TimestampField = str(tf["name"])
+			} else {
+				info.TimestampField = str(m["timestamp_field"])
+			}
+			if indices, ok := m["indices"].([]any); ok {
+				info.IndicesCount = strconv.Itoa(len(indices))
+			} else {
+				info.IndicesCount = str(m["indices_count"])
+			}
+			out = append(out, info)
+		}
+	}
+	return out, nil
+}
+
+// ListSnapshots lists snapshots for a repository.
+func (c *Client) ListSnapshots(repo string) ([]types.SnapshotInfo, error) {
+	if repo == "" {
+		data, _, err := c.do("GET", "/_snapshot", nil)
+		if err != nil {
+			return nil, err
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, err
+		}
+		for name := range raw {
+			repo = name
+			break
+		}
+		if repo == "" {
+			return []types.SnapshotInfo{}, nil
+		}
+	}
+	data, _, err := c.do("GET", "/_snapshot/"+url.PathEscape(repo)+"/_all", nil)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	var out []types.SnapshotInfo
+	if arr, ok := raw["snapshots"].([]any); ok {
+		for _, item := range arr {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			indices := ""
+			if idx, ok := m["indices"].([]any); ok {
+				parts := make([]string, 0, len(idx))
+				for _, p := range idx {
+					parts = append(parts, str(p))
+				}
+				indices = strings.Join(parts, ",")
+			}
+			out = append(out, types.SnapshotInfo{
+				Snapshot:   str(m["snapshot"]),
+				Repository: firstNonEmpty(str(m["repository"]), repo),
+				State:      str(m["state"]),
+				StartTime:  str(m["start_time"]),
+				EndTime:    str(m["end_time"]),
+				Indices:    indices,
+			})
+		}
+	}
+	return out, nil
+}
+
+// ExportDocs searches and returns documents up to maxDocs (capped at 5000).
+func (c *Client) ExportDocs(index, query string, maxDocs int) ([]types.Document, error) {
+	if maxDocs <= 0 || maxDocs > 5000 {
+		maxDocs = 5000
+	}
+	result, err := c.Search(index, query, 0, maxDocs)
+	if err != nil {
+		return nil, err
+	}
+	return result.Hits, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // GetLiveMetrics collects cluster-level metrics.

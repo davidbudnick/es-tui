@@ -61,6 +61,28 @@ func (m Model) getScreenView() string {
 		return m.viewTemplates()
 	case types.ScreenCatAPI:
 		return m.viewCatAPI()
+	case types.ScreenAllocation:
+		return m.viewAllocation()
+	case types.ScreenTasks:
+		return m.viewTasks()
+	case types.ScreenPlugins:
+		return m.viewPlugins()
+	case types.ScreenDataStreams:
+		return m.viewDataStreams()
+	case types.ScreenSnapshots:
+		return m.viewSnapshots()
+	case types.ScreenClusterSettings:
+		return m.viewClusterSettings()
+	case types.ScreenReindex:
+		return m.viewReindex()
+	case types.ScreenExport:
+		return m.viewExport()
+	case types.ScreenSavedQueries:
+		return m.viewSavedQueries()
+	case types.ScreenExplain:
+		return m.viewExplain()
+	case types.ScreenCommandPalette:
+		return m.viewCommandPalette()
 	default:
 		return ""
 	}
@@ -122,6 +144,12 @@ func (m Model) getStatusBar() string {
 			flavor = "auto"
 		}
 		parts = append(parts, dimStyle.Render(flavor))
+		if m.ReadOnly {
+			parts = append(parts, yellowStyle.Render("RO"))
+		}
+		if m.ClusterHealth.Status != "" {
+			parts = append(parts, healthStyle(m.ClusterHealth.Status).Render(m.ClusterHealth.Status))
+		}
 	}
 	if m.UpdateAvailable != "" {
 		parts = append(parts, yellowStyle.Render("update: "+m.UpdateAvailable))
@@ -609,36 +637,27 @@ func (m Model) viewHelp() string {
 		}},
 		{"Indices", [][2]string{
 			{"enter", "Browse documents"},
-			{"/", "Search (split pane)"},
-			{"i", "Index detail"},
-			{"O", "Open index"},
-			{"X", "Close index"},
-			{"u", "Refresh index"},
-			{"M", "Force-merge"},
-			{"a", "Create index"},
-			{"d", "Delete index"},
-			{"c", "Cluster health"},
-			{"n", "Nodes"},
-			{"m", "Live metrics"},
-			{"*", "Favorite"},
+			{"/", "Search"},
+			{":", "Command palette"},
+			{"O/X", "Open / close index"},
+			{"u/M", "Refresh / force-merge"},
+			{"I", "Reindex"},
+			{"V/W", "Allocation / tasks"},
+			{"E/U/Z", "Data streams / cluster settings / snapshots"},
+			{"Y/Q/#", "Saved queries / export / count"},
+			{"c/n/m", "Health / nodes / metrics"},
 		}},
 		{"Search", [][2]string{
 			{"enter", "Run query / open hit"},
-			{"j/k", "Move hits"},
-			{"n/p", "Next / prev page"},
-			{"y", "Copy JSON"},
-			{"↑/↓", "Query history (in input)"},
-			{"tab", "Toggle query/results focus"},
+			{"j/k n/p", "Navigate / page"},
+			{"y/S/x/#", "Copy / save query / explain / count"},
+			{":", "Command palette"},
 		}},
 		{"Documents", [][2]string{
-			{"enter", "Open document"},
-			{"/", "Full search"},
-			{"f", "Inline filter"},
-			{"y", "Copy JSON"},
-			{"n/p", "Page"},
-			{"e", "Edit / index"},
-			{"d", "Delete"},
-			{"D", "Bulk delete-by-query"},
+			{"enter", "Open"},
+			{"/ f", "Search / inline filter"},
+			{"y n/p", "Copy / page"},
+			{"e d D", "Edit / delete / bulk"},
 		}},
 	}
 	for _, sec := range sections {

@@ -20,6 +20,7 @@ type Config struct {
 	Groups           []types.ConnectionGroup   `json:"groups,omitempty"`
 	Favorites        []types.Favorite          `json:"favorites,omitempty"`
 	RecentIndices    []types.RecentIndex       `json:"recent_indices,omitempty"`
+	SavedQueries     []types.SavedQuery        `json:"saved_queries,omitempty"`
 	KeyBindings      types.KeyBindings         `json:"key_bindings"`
 	ValueHistory     []types.ValueHistoryEntry `json:"-"`
 	MaxRecentIndices int                       `json:"max_recent_indices"`
@@ -37,6 +38,7 @@ func NewConfig(configPath string) (*Config, error) {
 		Groups:           []types.ConnectionGroup{},
 		Favorites:        []types.Favorite{},
 		RecentIndices:    []types.RecentIndex{},
+		SavedQueries:     []types.SavedQuery{},
 		KeyBindings:      types.DefaultKeyBindings(),
 		MaxRecentIndices: 20,
 		MaxValueHistory:  50,
@@ -75,6 +77,7 @@ func (c *Config) save() error {
 		safeConnections[i] = conn
 		safeConnections[i].Password = ""
 		safeConnections[i].APIKey = ""
+		safeConnections[i].BearerToken = ""
 	}
 
 	safeCfg := &Config{
@@ -82,6 +85,7 @@ func (c *Config) save() error {
 		Groups:           c.Groups,
 		Favorites:        c.Favorites,
 		RecentIndices:    c.RecentIndices,
+		SavedQueries:     c.SavedQueries,
 		KeyBindings:      c.KeyBindings,
 		MaxRecentIndices: c.MaxRecentIndices,
 		MaxValueHistory:  c.MaxValueHistory,
@@ -160,6 +164,9 @@ func (c *Config) UpdateConnection(conn types.Connection) (types.Connection, erro
 			}
 			if conn.APIKey == "" {
 				conn.APIKey = existing.APIKey
+			}
+			if conn.BearerToken == "" {
+				conn.BearerToken = existing.BearerToken
 			}
 			conn.Created = existing.Created
 			conn.Updated = time.Now()
@@ -410,6 +417,55 @@ func (c *Config) RemoveConnectionFromGroup(groupName string, connID int64) error
 		}
 	}
 	return os.ErrNotExist
+}
+
+// ListSavedQueries returns all saved queries.
+func (c *Config) ListSavedQueries() []types.SavedQuery {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make([]types.SavedQuery, len(c.SavedQueries))
+	copy(result, c.SavedQueries)
+	return result
+}
+
+// AddSavedQuery adds or replaces a saved query by name.
+func (c *Config) AddSavedQuery(q types.SavedQuery) (types.SavedQuery, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if q.Created.IsZero() {
+		q.Created = time.Now()
+	}
+	for i, existing := range c.SavedQueries {
+		if existing.Name == q.Name {
+			c.SavedQueries[i] = q
+			if err := c.save(); err != nil {
+				c.SavedQueries[i] = existing
+				return types.SavedQuery{}, err
+			}
+			return q, nil
+		}
+	}
+	c.SavedQueries = append(c.SavedQueries, q)
+	if err := c.save(); err != nil {
+		c.SavedQueries = c.SavedQueries[:len(c.SavedQueries)-1]
+		return types.SavedQuery{}, err
+	}
+	return q, nil
+}
+
+// DeleteSavedQuery removes a saved query by name.
+func (c *Config) DeleteSavedQuery(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i, q := range c.SavedQueries {
+		if q.Name == name {
+			c.SavedQueries = append(c.SavedQueries[:i], c.SavedQueries[i+1:]...)
+			return c.save()
+		}
+	}
+	return nil
 }
 
 // GetKeyBindings returns current key bindings.

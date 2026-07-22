@@ -163,3 +163,70 @@ type ValueHistoryEntry struct {
 	Timestamp time.Time
 	Action    string
 }
+
+// AllocationInfo holds cat allocation row data.
+type AllocationInfo struct {
+	Shards      string
+	DiskIndices string
+	DiskUsed    string
+	DiskAvail   string
+	DiskTotal   string
+	DiskPercent string
+	Host        string
+	IP          string
+	Node        string
+}
+
+// TaskInfo holds cluster task metadata.
+type TaskInfo struct {
+	ID          string
+	Action      string
+	Type        string
+	StartTime   string
+	RunningTime string
+	Cancellable string
+	Node        string
+	Description string
+}
+
+// PluginInfo holds installed plugin metadata.
+type PluginInfo struct {
+	Name      string
+	Component string
+	Version   string
+}
+
+// DataStreamInfo holds data stream metadata.
+type DataStreamInfo struct {
+	Name           string
+	TimestampField string
+	IndicesCount   string
+	Generation     string
+	Status         string
+	Template       string
+}
+
+// SnapshotInfo holds snapshot metadata.
+type SnapshotInfo struct {
+	Snapshot   string
+	Repository string
+	State      string
+	StartTime  string
+	EndTime    string
+	Indices    string
+}
+
+// SavedQuery stores a named search query.
+type SavedQuery struct {
+	Name    string    `json:"name"`
+	Index   string    `json:"index"`
+	Query   string    `json:"query"`
+	Created time.Time `json:"created"`
+}
+
+// ExplainResult holds a query explain response.
+type ExplainResult struct {
+	Matched     bool
+	Explanation string
+	Raw         string
+}

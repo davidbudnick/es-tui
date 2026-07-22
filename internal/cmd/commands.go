@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -9,6 +10,8 @@ import (
 	"github.com/davidbudnick/es-tui/internal/service"
 	"github.com/davidbudnick/es-tui/internal/types"
 )
+
+var errReadOnly = fmt.Errorf("read-only mode")
 
 // Commands wraps service dependencies and returns tea.Cmd factories.
 type Commands struct {
@@ -123,6 +126,9 @@ func (c *Commands) LoadIndexDetail(name string) tea.Cmd {
 // CreateIndex creates an index.
 func (c *Commands) CreateIndex(name, body string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.IndexCreatedMsg{Name: name, Err: errReadOnly}
+		}
 		err := c.es.CreateIndex(name, body)
 		return types.IndexCreatedMsg{Name: name, Err: err}
 	}
@@ -131,6 +137,9 @@ func (c *Commands) CreateIndex(name, body string) tea.Cmd {
 // DeleteIndex deletes an index.
 func (c *Commands) DeleteIndex(name string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.IndexDeletedMsg{Name: name, Err: errReadOnly}
+		}
 		err := c.es.DeleteIndex(name)
 		return types.IndexDeletedMsg{Name: name, Err: err}
 	}
@@ -162,6 +171,9 @@ func (c *Commands) LoadDocument(index, id string) tea.Cmd {
 // SaveDocument indexes a document.
 func (c *Commands) SaveDocument(index, id, body string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.DocumentSavedMsg{Index: index, ID: id, Err: errReadOnly}
+		}
 		if c.config != nil {
 			c.config.AddValueHistory(index, id, body, "save")
 		}
@@ -173,6 +185,9 @@ func (c *Commands) SaveDocument(index, id, body string) tea.Cmd {
 // DeleteDocument deletes a document.
 func (c *Commands) DeleteDocument(index, id string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.DocumentDeletedMsg{Index: index, ID: id, Err: errReadOnly}
+		}
 		err := c.es.DeleteDocument(index, id)
 		return types.DocumentDeletedMsg{Index: index, ID: id, Err: err}
 	}
@@ -244,6 +259,9 @@ func (c *Commands) LiveMetricsTick() tea.Cmd {
 // BulkDelete runs delete-by-query.
 func (c *Commands) BulkDelete(index, query string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.BulkDeleteMsg{Index: index, Err: errReadOnly}
+		}
 		deleted, err := c.es.DeleteByQuery(index, query)
 		return types.BulkDeleteMsg{Index: index, Deleted: deleted, Err: err}
 	}
@@ -308,6 +326,9 @@ func (c *Commands) LoadIndexMappings(name string) tea.Cmd {
 // RefreshIndex refreshes an index.
 func (c *Commands) RefreshIndex(name string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.IndicesLoadedMsg{Err: errReadOnly}
+		}
 		err := c.es.RefreshIndex(name)
 		if err != nil {
 			return types.IndicesLoadedMsg{Err: err}
@@ -320,6 +341,9 @@ func (c *Commands) RefreshIndex(name string) tea.Cmd {
 // RefreshIndexOnly refreshes an index without reloading the index list.
 func (c *Commands) RefreshIndexOnly(name string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.IndexOpMsg{Op: "refresh", Index: name, Err: errReadOnly}
+		}
 		return types.IndexOpMsg{Op: "refresh", Index: name, Err: c.es.RefreshIndex(name)}
 	}
 }
@@ -327,6 +351,9 @@ func (c *Commands) RefreshIndexOnly(name string) tea.Cmd {
 // OpenIndex opens a closed index.
 func (c *Commands) OpenIndex(name string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.IndexOpMsg{Op: "open", Index: name, Err: errReadOnly}
+		}
 		return types.IndexOpMsg{Op: "open", Index: name, Err: c.es.OpenIndex(name)}
 	}
 }
@@ -334,6 +361,9 @@ func (c *Commands) OpenIndex(name string) tea.Cmd {
 // CloseIndex closes an open index.
 func (c *Commands) CloseIndex(name string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.IndexOpMsg{Op: "close", Index: name, Err: errReadOnly}
+		}
 		return types.IndexOpMsg{Op: "close", Index: name, Err: c.es.CloseIndex(name)}
 	}
 }
@@ -341,7 +371,134 @@ func (c *Commands) CloseIndex(name string) tea.Cmd {
 // ForceMerge force-merges an index.
 func (c *Commands) ForceMerge(name string) tea.Cmd {
 	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.IndexOpMsg{Op: "forcemerge", Index: name, Err: errReadOnly}
+		}
 		return types.IndexOpMsg{Op: "forcemerge", Index: name, Err: c.es.ForceMerge(name, 0)}
+	}
+}
+
+// Count counts documents matching a query.
+func (c *Commands) Count(index, query string) tea.Cmd {
+	return func() tea.Msg {
+		n, err := c.es.Count(index, query)
+		return types.CountMsg{Count: n, Err: err}
+	}
+}
+
+// Explain explains why a document matches a query.
+func (c *Commands) Explain(index, id, query string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := c.es.Explain(index, id, query)
+		return types.ExplainLoadedMsg{Result: result, Err: err}
+	}
+}
+
+// Reindex starts an async reindex.
+func (c *Commands) Reindex(body string) tea.Cmd {
+	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.ReindexMsg{Err: errReadOnly}
+		}
+		task, err := c.es.Reindex(body)
+		return types.ReindexMsg{Task: task, Err: err}
+	}
+}
+
+// LoadAllocation loads shard allocation.
+func (c *Commands) LoadAllocation() tea.Cmd {
+	return func() tea.Msg {
+		alloc, err := c.es.ListAllocation()
+		return types.AllocationLoadedMsg{Allocation: alloc, Err: err}
+	}
+}
+
+// LoadTasks loads cluster tasks.
+func (c *Commands) LoadTasks() tea.Cmd {
+	return func() tea.Msg {
+		tasks, err := c.es.ListTasks()
+		return types.TasksLoadedMsg{Tasks: tasks, Err: err}
+	}
+}
+
+// CancelTask cancels a running task.
+func (c *Commands) CancelTask(taskID string) tea.Cmd {
+	return func() tea.Msg {
+		if c.es.IsReadOnly() {
+			return types.TasksLoadedMsg{Err: errReadOnly}
+		}
+		if err := c.es.CancelTask(taskID); err != nil {
+			return types.TasksLoadedMsg{Err: err}
+		}
+		tasks, err := c.es.ListTasks()
+		return types.TasksLoadedMsg{Tasks: tasks, Err: err}
+	}
+}
+
+// LoadPlugins loads installed plugins.
+func (c *Commands) LoadPlugins() tea.Cmd {
+	return func() tea.Msg {
+		plugins, err := c.es.ListPlugins()
+		return types.PluginsLoadedMsg{Plugins: plugins, Err: err}
+	}
+}
+
+// LoadClusterSettings loads cluster settings.
+func (c *Commands) LoadClusterSettings() tea.Cmd {
+	return func() tea.Msg {
+		settings, err := c.es.GetClusterSettings()
+		return types.ClusterSettingsLoadedMsg{Settings: settings, Err: err}
+	}
+}
+
+// LoadDataStreams loads data streams.
+func (c *Commands) LoadDataStreams() tea.Cmd {
+	return func() tea.Msg {
+		streams, err := c.es.ListDataStreams()
+		return types.DataStreamsLoadedMsg{DataStreams: streams, Err: err}
+	}
+}
+
+// LoadSnapshots loads snapshots for a repository.
+func (c *Commands) LoadSnapshots(repo string) tea.Cmd {
+	return func() tea.Msg {
+		snaps, err := c.es.ListSnapshots(repo)
+		return types.SnapshotsLoadedMsg{Snapshots: snaps, Err: err}
+	}
+}
+
+// ExportDocs exports documents matching a query.
+func (c *Commands) ExportDocs(index, query string, maxDocs int) tea.Cmd {
+	return func() tea.Msg {
+		docs, err := c.es.ExportDocs(index, query, maxDocs)
+		if err != nil {
+			return types.ExportCompleteMsg{Err: err}
+		}
+		return types.ExportCompleteMsg{Count: len(docs)}
+	}
+}
+
+// LoadSavedQueries loads saved queries from config.
+func (c *Commands) LoadSavedQueries() tea.Cmd {
+	return func() tea.Msg {
+		queries := c.config.ListSavedQueries()
+		return types.SavedQueriesLoadedMsg{Queries: queries}
+	}
+}
+
+// AddSavedQuery persists a saved query.
+func (c *Commands) AddSavedQuery(q types.SavedQuery) tea.Cmd {
+	return func() tea.Msg {
+		added, err := c.config.AddSavedQuery(q)
+		return types.SavedQueryAddedMsg{Query: added, Err: err}
+	}
+}
+
+// DeleteSavedQuery removes a saved query by name.
+func (c *Commands) DeleteSavedQuery(name string) tea.Cmd {
+	return func() tea.Msg {
+		err := c.config.DeleteSavedQuery(name)
+		return types.SavedQueryDeletedMsg{Name: name, Err: err}
 	}
 }
 

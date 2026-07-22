@@ -66,6 +66,28 @@ type Model struct {
 	LiveMetrics       *types.LiveMetrics
 	LiveMetricsActive bool
 
+	Allocation      []types.AllocationInfo
+	Tasks           []types.TaskInfo
+	SelectedTaskIdx int
+	Plugins         []types.PluginInfo
+	DataStreams     []types.DataStreamInfo
+	Snapshots       []types.SnapshotInfo
+	ClusterSettings string
+	ExplainResult   *types.ExplainResult
+	CountResult     int64
+	SavedQueries    []types.SavedQuery
+	SelectedSQIdx   int
+	ReadOnly        bool
+
+	// Command palette
+	PaletteFilter string
+	PaletteIdx    int
+	PaletteItems  []PaletteItem
+
+	// Reindex / export forms
+	ReindexFocus int
+	ExportPath   string
+
 	Width           int
 	Height          int
 	Err             error
@@ -87,16 +109,29 @@ type Model struct {
 	inputsInitialized bool
 }
 
+// PaletteItem is one command-palette action.
+type PaletteItem struct {
+	ID   string
+	Label string
+	Keys string
+}
+
 // ModelInputs holds text inputs behind a pointer to keep Model small.
 type ModelInputs struct {
-	PatternInput    textinput.Model
-	SearchInput     textinput.Model
-	IndexNameInput  textinput.Model
-	IndexBodyInput  textinput.Model
-	DocBodyInput    textinput.Model
-	DocIDInput      textinput.Model
-	BulkDeleteInput textinput.Model
-	CatInput        textinput.Model
+	PatternInput     textinput.Model
+	SearchInput      textinput.Model
+	IndexNameInput   textinput.Model
+	IndexBodyInput   textinput.Model
+	DocBodyInput     textinput.Model
+	DocIDInput       textinput.Model
+	BulkDeleteInput  textinput.Model
+	CatInput         textinput.Model
+	ReindexSrcInput  textinput.Model
+	ReindexDstInput  textinput.Model
+	ExportInput      textinput.Model
+	PaletteInput     textinput.Model
+	SavedQueryName   textinput.Model
+	SnapshotRepo     textinput.Model
 }
 
 // NewModel creates a default model.
@@ -121,7 +156,39 @@ func NewModel() Model {
 			DocIDInput:      createTextInput("Document ID (optional)", 40),
 			BulkDeleteInput: createTextInput("Delete-by-query (query_string or JSON)", 50),
 			CatInput:        createTextInput("Cat endpoint (e.g. indices, shards, nodes)", 40),
+			ReindexSrcInput: createTextInput("Source index", 40),
+			ReindexDstInput: createTextInput("Dest index", 40),
+			ExportInput:     createTextInput("Export path (e.g. /tmp/out.ndjson)", 50),
+			PaletteInput:    createTextInput("Filter commands...", 40),
+			SavedQueryName:  createTextInput("Saved query name", 30),
+			SnapshotRepo:    createTextInput("Snapshot repository name", 40),
 		},
+	}
+}
+
+func defaultPaletteItems() []PaletteItem {
+	return []PaletteItem{
+		{ID: "health", Label: "Cluster health", Keys: "c"},
+		{ID: "nodes", Label: "Nodes", Keys: "n"},
+		{ID: "metrics", Label: "Live metrics", Keys: "m"},
+		{ID: "shards", Label: "Shards", Keys: "s"},
+		{ID: "allocation", Label: "Disk allocation", Keys: ""},
+		{ID: "aliases", Label: "Aliases", Keys: "A"},
+		{ID: "templates", Label: "Index templates", Keys: "T"},
+		{ID: "datastreams", Label: "Data streams", Keys: ""},
+		{ID: "tasks", Label: "Tasks", Keys: ""},
+		{ID: "plugins", Label: "Plugins", Keys: ""},
+		{ID: "settings", Label: "Cluster settings", Keys: ""},
+		{ID: "snapshots", Label: "Snapshots", Keys: ""},
+		{ID: "search", Label: "Search", Keys: "/"},
+		{ID: "reindex", Label: "Reindex", Keys: ""},
+		{ID: "export", Label: "Export documents", Keys: ""},
+		{ID: "saved", Label: "Saved queries", Keys: ""},
+		{ID: "cat", Label: "Cat API", Keys: "C"},
+		{ID: "favorites", Label: "Favorites", Keys: "F"},
+		{ID: "recent", Label: "Recent indices", Keys: "R"},
+		{ID: "logs", Label: "App logs", Keys: "L"},
+		{ID: "help", Label: "Help", Keys: "?"},
 	}
 }
 
@@ -157,21 +224,26 @@ func createConnectionInputs() []textinput.Model {
 		"Username",
 		"Password",
 		"API Key",
+		"Bearer Token",
 		"Flavor (auto|elasticsearch|opensearch)",
+		"Read-only (true|false)",
 	}
 	inputs := make([]textinput.Model, len(labels))
 	for i, label := range labels {
 		ti := textinput.New()
 		ti.Placeholder = label
-		ti.CharLimit = 512
+		ti.CharLimit = 2048
 		ti.SetWidth(40)
 		if i == 2 {
 			ti.SetValue("9200")
 		}
-		if i == 6 {
+		if i == 7 {
 			ti.SetValue("auto")
 		}
-		if i == 4 || i == 5 {
+		if i == 8 {
+			ti.SetValue("false")
+		}
+		if i == 4 || i == 5 || i == 6 {
 			ti.EchoMode = textinput.EchoPassword
 			ti.EchoCharacter = '•'
 		}

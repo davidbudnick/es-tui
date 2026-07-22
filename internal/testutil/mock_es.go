@@ -19,47 +19,69 @@ type MockES struct {
 	TestInfo    types.ClusterInfo
 	TestErr     error
 
-	Info          types.ClusterInfo
-	InfoErr       error
-	Health        types.ClusterHealth
-	HealthErr     error
-	Nodes         []types.NodeInfo
-	NodesErr      error
-	Shards        []types.ShardInfo
-	ShardsErr     error
-	Metrics       types.LiveMetricsData
-	MetricsErr    error
-	CatBody       string
-	CatErr        error
-	Indices       []types.IndexInfo
-	IndicesErr    error
-	IndexDetail   types.IndexInfo
-	IndexErr      error
-	CreateErr     error
-	DeleteErr     error
-	Settings      string
-	SettingsErr   error
-	Mappings      string
-	MappingsErr   error
-	RefreshErr    error
-	OpenErr       error
-	CloseErr      error
-	ForceMergeErr error
-	SearchResult  types.SearchResult
-	SearchErr     error
-	Document      types.Document
-	DocumentErr   error
-	IndexDocErr   error
-	DeleteDocErr  error
-	DeleteByQ     int64
-	DeleteByQErr  error
-	Aliases       []types.AliasInfo
-	AliasesErr    error
-	Templates     []types.IndexTemplate
-	TemplatesErr  error
-	LastConnect   types.Connection
-	LastSearchIdx string
-	LastSearchQ   string
+	Info               types.ClusterInfo
+	InfoErr            error
+	Health             types.ClusterHealth
+	HealthErr          error
+	Nodes              []types.NodeInfo
+	NodesErr           error
+	Shards             []types.ShardInfo
+	ShardsErr          error
+	Metrics            types.LiveMetricsData
+	MetricsErr         error
+	CatBody            string
+	CatErr             error
+	Indices            []types.IndexInfo
+	IndicesErr         error
+	IndexDetail        types.IndexInfo
+	IndexErr           error
+	CreateErr          error
+	DeleteErr          error
+	Settings           string
+	SettingsErr        error
+	Mappings           string
+	MappingsErr        error
+	RefreshErr         error
+	OpenErr            error
+	CloseErr           error
+	ForceMergeErr      error
+	SearchResult       types.SearchResult
+	SearchErr          error
+	Document           types.Document
+	DocumentErr        error
+	IndexDocErr        error
+	DeleteDocErr       error
+	DeleteByQ          int64
+	DeleteByQErr       error
+	Aliases            []types.AliasInfo
+	AliasesErr         error
+	Templates          []types.IndexTemplate
+	TemplatesErr       error
+	ReadOnly           bool
+	CountVal           int64
+	CountErr           error
+	ExplainResult      types.ExplainResult
+	ExplainErr         error
+	ReindexTask        string
+	ReindexErr         error
+	Allocation         []types.AllocationInfo
+	AllocationErr      error
+	Tasks              []types.TaskInfo
+	TasksErr           error
+	CancelTaskErr      error
+	Plugins            []types.PluginInfo
+	PluginsErr         error
+	ClusterSettings    string
+	ClusterSettingsErr error
+	DataStreams        []types.DataStreamInfo
+	DataStreamsErr     error
+	Snapshots          []types.SnapshotInfo
+	SnapshotsErr       error
+	ExportDocsVal      []types.Document
+	ExportDocsErr      error
+	LastConnect        types.Connection
+	LastSearchIdx      string
+	LastSearchQ        string
 }
 
 func (m *MockES) Connect(conn types.Connection) error {
@@ -99,6 +121,12 @@ func (m *MockES) Flavor() types.Flavor {
 		return m.FlavorVal
 	}
 	return types.FlavorElasticsearch
+}
+
+func (m *MockES) IsReadOnly() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ReadOnly
 }
 
 func (m *MockES) GetClusterInfo() (types.ClusterInfo, error) {
@@ -264,4 +292,70 @@ func (m *MockES) ListTemplates() ([]types.IndexTemplate, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.Templates, m.TemplatesErr
+}
+
+func (m *MockES) Count(index, query string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.CountVal, m.CountErr
+}
+
+func (m *MockES) Explain(index, id, query string) (types.ExplainResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ExplainResult, m.ExplainErr
+}
+
+func (m *MockES) Reindex(body string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ReindexTask, m.ReindexErr
+}
+
+func (m *MockES) ListAllocation() ([]types.AllocationInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Allocation, m.AllocationErr
+}
+
+func (m *MockES) ListTasks() ([]types.TaskInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Tasks, m.TasksErr
+}
+
+func (m *MockES) CancelTask(taskID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.CancelTaskErr
+}
+
+func (m *MockES) ListPlugins() ([]types.PluginInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Plugins, m.PluginsErr
+}
+
+func (m *MockES) GetClusterSettings() (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ClusterSettings, m.ClusterSettingsErr
+}
+
+func (m *MockES) ListDataStreams() ([]types.DataStreamInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.DataStreams, m.DataStreamsErr
+}
+
+func (m *MockES) ListSnapshots(repo string) ([]types.SnapshotInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Snapshots, m.SnapshotsErr
+}
+
+func (m *MockES) ExportDocs(index, query string, maxDocs int) ([]types.Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ExportDocsVal, m.ExportDocsErr
 }

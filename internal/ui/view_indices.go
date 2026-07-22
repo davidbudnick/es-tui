@@ -35,7 +35,7 @@ func (m Model) viewIndices() string {
 		Render(rightContent)
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
-	help := helpStyle.Render("j/k:nav  enter:docs  /:search  i:detail  O:open  X:close  u:refresh  M:merge  a:create  d:del  c:health  n:nodes  m:metrics  *:fav  r:reload  q:back")
+	help := helpStyle.Render("j/k  enter:docs  /:search  ::palette  O/X open/close  u refresh  M merge  I reindex  V alloc  W tasks  #:count  c/n/m health/nodes/metrics  q:back")
 	return content + "\n" + help
 }
 

@@ -36,7 +36,7 @@ func (m Model) viewSearch() string {
 		Render(right)
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
-	help := helpStyle.Render("/:query  enter:run  j/k:hits  o:open  y:copy  n/p:page  ↑hist  tab:focus  esc:back")
+	help := helpStyle.Render("/:query  enter:run  j/k:hits  o:open  y:copy  S:save  #:count  x:explain  n/p:page  ::palette  esc:back")
 	return content + "\n" + help
 }
 

@@ -624,11 +624,11 @@ func TestKeyHandlersFormsAndDocs(t *testing.T) {
 		t.Fatal("bad port")
 	}
 	m.ConnInputs[2].SetValue("9200")
-	m.ConnInputs[6].SetValue("nope")
+	m.ConnInputs[7].SetValue("nope")
 	if _, err := m.connectionFromInputs(); err == nil {
 		t.Fatal("bad flavor")
 	}
-	m.ConnInputs[6].SetValue("elasticsearch")
+	m.ConnInputs[7].SetValue("elasticsearch")
 	m.ConnInputs[0].SetValue("")
 	conn, err := m.connectionFromInputs()
 	if err != nil || conn.Name == "" {

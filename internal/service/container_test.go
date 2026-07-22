@@ -34,10 +34,15 @@ func (s *stubConfig) ListGroups() []types.ConnectionGroup                      {
 func (s *stubConfig) AddGroup(string, string) error                            { return nil }
 func (s *stubConfig) AddConnectionToGroup(string, int64) error                 { return nil }
 func (s *stubConfig) RemoveConnectionFromGroup(string, int64) error            { return nil }
-func (s *stubConfig) GetKeyBindings() types.KeyBindings                        { return types.DefaultKeyBindings() }
-func (s *stubConfig) SetKeyBindings(types.KeyBindings) error                   { return nil }
-func (s *stubConfig) ResetKeyBindings() error                                  { return nil }
-func (s *stubConfig) Close() error                                             { return s.closeErr }
+func (s *stubConfig) ListSavedQueries() []types.SavedQuery                     { return nil }
+func (s *stubConfig) AddSavedQuery(types.SavedQuery) (types.SavedQuery, error) {
+	return types.SavedQuery{}, nil
+}
+func (s *stubConfig) DeleteSavedQuery(string) error          { return nil }
+func (s *stubConfig) GetKeyBindings() types.KeyBindings      { return types.DefaultKeyBindings() }
+func (s *stubConfig) SetKeyBindings(types.KeyBindings) error { return nil }
+func (s *stubConfig) ResetKeyBindings() error                { return nil }
+func (s *stubConfig) Close() error                           { return s.closeErr }
 
 type stubES struct{ discErr error }
 
@@ -47,6 +52,7 @@ func (s *stubES) TestConnection(types.Connection) (time.Duration, types.ClusterI
 	return 0, types.ClusterInfo{}, nil
 }
 func (s *stubES) IsConnected() bool                              { return false }
+func (s *stubES) IsReadOnly() bool                               { return false }
 func (s *stubES) Flavor() types.Flavor                           { return types.FlavorAuto }
 func (s *stubES) GetClusterInfo() (types.ClusterInfo, error)     { return types.ClusterInfo{}, nil }
 func (s *stubES) GetClusterHealth() (types.ClusterHealth, error) { return types.ClusterHealth{}, nil }
@@ -54,16 +60,30 @@ func (s *stubES) GetNodes() ([]types.NodeInfo, error)            { return nil, n
 func (s *stubES) GetShards(string) ([]types.ShardInfo, error)    { return nil, nil }
 func (s *stubES) GetLiveMetrics() (types.LiveMetricsData, error) { return types.LiveMetricsData{}, nil }
 func (s *stubES) Cat(string) (string, error)                     { return "", nil }
-func (s *stubES) ListIndices(string) ([]types.IndexInfo, error)  { return nil, nil }
-func (s *stubES) GetIndex(string) (types.IndexInfo, error)       { return types.IndexInfo{}, nil }
-func (s *stubES) CreateIndex(string, string) error               { return nil }
-func (s *stubES) DeleteIndex(string) error                       { return nil }
-func (s *stubES) GetIndexSettings(string) (string, error)        { return "", nil }
-func (s *stubES) GetIndexMappings(string) (string, error)        { return "", nil }
-func (s *stubES) RefreshIndex(string) error                      { return nil }
-func (s *stubES) OpenIndex(string) error                         { return nil }
-func (s *stubES) CloseIndex(string) error                        { return nil }
-func (s *stubES) ForceMerge(string, int) error                   { return nil }
+func (s *stubES) GetClusterSettings() (string, error)            { return "", nil }
+func (s *stubES) ListAllocation() ([]types.AllocationInfo, error) {
+	return nil, nil
+}
+func (s *stubES) ListTasks() ([]types.TaskInfo, error)     { return nil, nil }
+func (s *stubES) CancelTask(string) error                  { return nil }
+func (s *stubES) ListPlugins() ([]types.PluginInfo, error) { return nil, nil }
+func (s *stubES) ListDataStreams() ([]types.DataStreamInfo, error) {
+	return nil, nil
+}
+func (s *stubES) ListSnapshots(string) ([]types.SnapshotInfo, error) {
+	return nil, nil
+}
+func (s *stubES) ListIndices(string) ([]types.IndexInfo, error) { return nil, nil }
+func (s *stubES) GetIndex(string) (types.IndexInfo, error)      { return types.IndexInfo{}, nil }
+func (s *stubES) CreateIndex(string, string) error              { return nil }
+func (s *stubES) DeleteIndex(string) error                      { return nil }
+func (s *stubES) GetIndexSettings(string) (string, error)       { return "", nil }
+func (s *stubES) GetIndexMappings(string) (string, error)       { return "", nil }
+func (s *stubES) RefreshIndex(string) error                     { return nil }
+func (s *stubES) OpenIndex(string) error                        { return nil }
+func (s *stubES) CloseIndex(string) error                       { return nil }
+func (s *stubES) ForceMerge(string, int) error                  { return nil }
+func (s *stubES) Reindex(string) (string, error)                { return "", nil }
 func (s *stubES) Search(string, string, int, int) (types.SearchResult, error) {
 	return types.SearchResult{}, nil
 }
@@ -71,8 +91,15 @@ func (s *stubES) GetDocument(string, string) (types.Document, error) { return ty
 func (s *stubES) IndexDocument(string, string, string) error         { return nil }
 func (s *stubES) DeleteDocument(string, string) error                { return nil }
 func (s *stubES) DeleteByQuery(string, string) (int64, error)        { return 0, nil }
-func (s *stubES) ListAliases() ([]types.AliasInfo, error)            { return nil, nil }
-func (s *stubES) ListTemplates() ([]types.IndexTemplate, error)      { return nil, nil }
+func (s *stubES) Count(string, string) (int64, error)                { return 0, nil }
+func (s *stubES) Explain(string, string, string) (types.ExplainResult, error) {
+	return types.ExplainResult{}, nil
+}
+func (s *stubES) ExportDocs(string, string, int) ([]types.Document, error) {
+	return nil, nil
+}
+func (s *stubES) ListAliases() ([]types.AliasInfo, error)       { return nil, nil }
+func (s *stubES) ListTemplates() ([]types.IndexTemplate, error) { return nil, nil }
 
 func TestNewContainerAndClose(t *testing.T) {
 	c := NewContainer(&stubConfig{}, &stubES{})

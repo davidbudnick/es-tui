@@ -36,6 +36,17 @@ func TestAllMethodsNotConnectedAndHTTPErrors(t *testing.T) {
 		func() error { _, err := c.ListTemplates(); return err },
 		func() error { _, err := c.Cat("indices"); return err },
 		func() error { _, err := c.GetLiveMetrics(); return err },
+		func() error { _, err := c.Count("x", ""); return err },
+		func() error { _, err := c.Explain("x", "1", ""); return err },
+		func() error { _, err := c.Reindex(`{}`); return err },
+		func() error { _, err := c.ListAllocation(); return err },
+		func() error { _, err := c.ListTasks(); return err },
+		func() error { return c.CancelTask("1") },
+		func() error { _, err := c.ListPlugins(); return err },
+		func() error { _, err := c.GetClusterSettings(); return err },
+		func() error { _, err := c.ListDataStreams(); return err },
+		func() error { _, err := c.ListSnapshots(""); return err },
+		func() error { _, err := c.ExportDocs("x", "", 10); return err },
 	}
 	for i, fn := range methods {
 		if err := fn(); err == nil {

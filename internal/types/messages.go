@@ -186,3 +186,69 @@ type CatAPIResultMsg struct {
 	Body     string
 	Err      error
 }
+
+type AllocationLoadedMsg struct {
+	Allocation []AllocationInfo
+	Err        error
+}
+
+type TasksLoadedMsg struct {
+	Tasks []TaskInfo
+	Err   error
+}
+
+type PluginsLoadedMsg struct {
+	Plugins []PluginInfo
+	Err     error
+}
+
+type DataStreamsLoadedMsg struct {
+	DataStreams []DataStreamInfo
+	Err         error
+}
+
+type SnapshotsLoadedMsg struct {
+	Snapshots []SnapshotInfo
+	Err       error
+}
+
+type ClusterSettingsLoadedMsg struct {
+	Settings string
+	Err      error
+}
+
+type ReindexMsg struct {
+	Task string
+	Err  error
+}
+
+type ExplainLoadedMsg struct {
+	Result ExplainResult
+	Err    error
+}
+
+type CountMsg struct {
+	Count int64
+	Err   error
+}
+
+type ExportCompleteMsg struct {
+	Filename string
+	Count    int
+	Err      error
+}
+
+type SavedQueriesLoadedMsg struct {
+	Queries []SavedQuery
+	Err     error
+}
+
+type SavedQueryAddedMsg struct {
+	Query SavedQuery
+	Err   error
+}
+
+type SavedQueryDeletedMsg struct {
+	Name string
+	Err  error
+}

@@ -32,6 +32,10 @@ type ConfigService interface {
 	AddConnectionToGroup(groupName string, connID int64) error
 	RemoveConnectionFromGroup(groupName string, connID int64) error
 
+	ListSavedQueries() []types.SavedQuery
+	AddSavedQuery(q types.SavedQuery) (types.SavedQuery, error)
+	DeleteSavedQuery(name string) error
+
 	GetKeyBindings() types.KeyBindings
 	SetKeyBindings(kb types.KeyBindings) error
 	ResetKeyBindings() error
@@ -45,6 +49,7 @@ type ESService interface {
 	Disconnect() error
 	TestConnection(conn types.Connection) (time.Duration, types.ClusterInfo, error)
 	IsConnected() bool
+	IsReadOnly() bool
 	Flavor() types.Flavor
 
 	// Cluster
@@ -54,6 +59,13 @@ type ESService interface {
 	GetShards(index string) ([]types.ShardInfo, error)
 	GetLiveMetrics() (types.LiveMetricsData, error)
 	Cat(endpoint string) (string, error)
+	GetClusterSettings() (string, error)
+	ListAllocation() ([]types.AllocationInfo, error)
+	ListTasks() ([]types.TaskInfo, error)
+	CancelTask(taskID string) error
+	ListPlugins() ([]types.PluginInfo, error)
+	ListDataStreams() ([]types.DataStreamInfo, error)
+	ListSnapshots(repo string) ([]types.SnapshotInfo, error)
 
 	// Indices
 	ListIndices(pattern string) ([]types.IndexInfo, error)
@@ -66,6 +78,7 @@ type ESService interface {
 	OpenIndex(name string) error
 	CloseIndex(name string) error
 	ForceMerge(name string, maxNumSegments int) error
+	Reindex(body string) (string, error)
 
 	// Documents
 	Search(index, query string, from, size int) (types.SearchResult, error)
@@ -73,6 +86,9 @@ type ESService interface {
 	IndexDocument(index, id, body string) error
 	DeleteDocument(index, id string) error
 	DeleteByQuery(index, query string) (int64, error)
+	Count(index, query string) (int64, error)
+	Explain(index, id, query string) (types.ExplainResult, error)
+	ExportDocs(index, query string, maxDocs int) ([]types.Document, error)
 
 	// Aliases & templates
 	ListAliases() ([]types.AliasInfo, error)
