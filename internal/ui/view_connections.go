@@ -138,11 +138,24 @@ func (m Model) renderLogo() string {
 }
 
 func (m Model) buildStatsBar() string {
-	n := len(m.Connections)
-	now := time.Now().Format("15:04:05")
-	connChip := statsBoxStyle.Render(fmt.Sprintf("Connections\n%s saved", tealStyle.Render(fmt.Sprintf("%d", n))))
-	timeChip := statsBoxStyle.Render(fmt.Sprintf("Time\n%s", dimStyle.Render(now)))
-	return lipgloss.JoinHorizontal(lipgloss.Top, connChip, "  ", timeChip)
+	boxes := []struct {
+		label string
+		value string
+		color string
+	}{
+		{"Connections", fmt.Sprintf("%d saved", len(m.Connections)), colorTeal},
+		{"Time", time.Now().Format("15:04:05"), colorMuted},
+	}
+
+	var statsBoxes []string
+	for _, box := range boxes {
+		content := fmt.Sprintf("%s\n%s",
+			dimStyle.Render(box.label),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(box.color)).Bold(true).Render(box.value),
+		)
+		statsBoxes = append(statsBoxes, statsBoxStyle.Width(18).Render(content))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, statsBoxes...)
 }
 
 func (m Model) viewConnectionForm() string {
