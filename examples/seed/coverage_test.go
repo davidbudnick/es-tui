@@ -3,45 +3,30 @@ package main
 import (
 	"bytes"
 	"flag"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
-func TestMainAndSeedMain(t *testing.T) {
+func TestMainPaths(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPut, http.MethodPost:
+		switch {
+		case r.Method == http.MethodDelete:
 			_, _ = w.Write([]byte(`{}`))
-		case http.MethodDelete:
-			w.WriteHeader(404)
-			_, _ = w.Write([]byte(`missing`))
+		case r.Method == http.MethodPut:
+			_, _ = w.Write([]byte(`{"acknowledged":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/_bulk":
+			_, _ = w.Write([]byte(`{"errors":false}`))
+		case r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer srv.Close()
 
-	if err := seedMain([]string{"-addr", srv.URL}); err != nil {
-		t.Fatal(err)
-	}
-	if err := seedMain([]string{"-addr", srv.URL, "-flush"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := seedMain([]string{"-h"}); err == nil {
-		// help returns ErrHelp
-		if err != flag.ErrHelp && err == nil {
-			// ContinueOnError returns error for -h
-		}
-	}
-	// unknown flag
-	if err := seedMain([]string{"-nope"}); err == nil {
-		t.Fatal("expected flag error")
-	}
-
-	// main success
 	oldArgs := os.Args
 	oldExit := osExit
 	oldOut := seedStdout
@@ -51,7 +36,7 @@ func TestMainAndSeedMain(t *testing.T) {
 	seedStderr = &errBuf
 	exited := -1
 	osExit = func(code int) { exited = code }
-	os.Args = []string{"seed", "-addr", srv.URL}
+	os.Args = []string{"seed", "-addr", srv.URL, "-flush"}
 	t.Cleanup(func() {
 		os.Args = oldArgs
 		osExit = oldExit
@@ -60,13 +45,15 @@ func TestMainAndSeedMain(t *testing.T) {
 	})
 	main()
 	if exited != -1 {
-		t.Fatalf("exit %d: %s", exited, errBuf.String())
+		t.Fatalf("exit %d stderr=%s", exited, errBuf.String())
 	}
-	if out.Len() == 0 {
-		t.Fatal("expected output")
+	if !strings.Contains(out.String(), "seeding complete") && !strings.Contains(out.String(), "Seed") {
+		// new message is "Done — seeding complete"
+		if !strings.Contains(out.String(), "Done") {
+			t.Fatalf("output=%q", out.String())
+		}
 	}
 
-	// main failure
 	os.Args = []string{"seed", "-addr", "http://127.0.0.1:1"}
 	exited = -1
 	errBuf.Reset()
@@ -75,23 +62,30 @@ func TestMainAndSeedMain(t *testing.T) {
 		t.Fatalf("expected exit 1 got %d", exited)
 	}
 
-	// put paths
+	if err := seedMain([]string{"-addr", srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	_ = flag.CommandLine
+}
+
+func TestHTTPErrorBranches(t *testing.T) {
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		_, _ = w.Write([]byte("err"))
 	}))
 	defer bad.Close()
 	if err := put(bad.Client(), bad.URL+"/x", map[string]any{"a": 1}); err == nil {
-		t.Fatal("expected error")
+		t.Fatal("put error")
 	}
-	if err := put(http.DefaultClient, "://bad", map[string]any{}); err == nil {
-		t.Fatal("bad url")
+	if err := post(bad.Client(), bad.URL+"/x", map[string]any{"a": 1}); err == nil {
+		t.Fatal("post error")
 	}
-	if err := put(http.DefaultClient, "http://127.0.0.1:1", map[string]any{"ch": make(chan int)}); err == nil {
-		t.Fatal("marshal")
+	if err := bulkIndex(bad.Client(), bad.URL, "idx", []map[string]any{{"a": 1}}); err == nil {
+		t.Fatal("bulk error")
 	}
+
+	// network
 	if err := run("http://127.0.0.1:1", true); err == nil {
 		t.Fatal("network")
 	}
-	_ = io.Discard
 }

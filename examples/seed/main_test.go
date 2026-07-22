@@ -2,70 +2,133 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-func TestRunSeed(t *testing.T) {
+func TestRunSeedRich(t *testing.T) {
 	indices := map[string]bool{}
-	docs := map[string]int{}
+	bulkDocs := 0
+	aliases := 0
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
 		case r.Method == http.MethodDelete:
-			name := strings.TrimPrefix(path, "/")
-			delete(indices, name)
 			w.WriteHeader(200)
 			_, _ = w.Write([]byte(`{"acknowledged":true}`))
-		case r.Method == http.MethodPut && !strings.Contains(path, "/_doc/"):
+		case r.Method == http.MethodPut && path == "/_aliases":
+			aliases++
+			_, _ = w.Write([]byte(`{"acknowledged":true}`))
+		case r.Method == http.MethodPut && !strings.Contains(path, "/_doc"):
 			name := strings.TrimPrefix(path, "/")
 			indices[name] = true
 			_, _ = w.Write([]byte(`{"acknowledged":true}`))
-		case r.Method == http.MethodPut && strings.Contains(path, "/_doc/"):
-			docs[path]++
-			_, _ = w.Write([]byte(`{"result":"created"}`))
+		case r.Method == http.MethodPost && path == "/_bulk":
+			// count ndjson pairs
+			var body []byte
+			buf := make([]byte, 64*1024)
+			for {
+				n, err := r.Body.Read(buf)
+				if n > 0 {
+					body = append(body, buf[:n]...)
+				}
+				if err != nil {
+					break
+				}
+			}
+			lines := 0
+			for _, line := range strings.Split(string(body), "\n") {
+				if strings.TrimSpace(line) != "" {
+					lines++
+				}
+			}
+			bulkDocs += lines / 2
+			_, _ = w.Write([]byte(`{"errors":false,"items":[]}`))
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/_refresh"):
 			_, _ = w.Write([]byte(`{"_shards":{"successful":1}}`))
+		case r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer srv.Close()
 
+	oldOut := seedStdout
+	seedStdout = ioDiscard{}
+	t.Cleanup(func() { seedStdout = oldOut })
+
 	if err := run(srv.URL, true); err != nil {
 		t.Fatal(err)
 	}
-	if !indices["products"] || !indices["orders"] || !indices["logs-demo"] {
-		t.Fatalf("indices=%v", indices)
+	for _, name := range demoIndexNames() {
+		if !indices[name] {
+			t.Fatalf("missing index create for %s: %v", name, indices)
+		}
 	}
-	if len(docs) < 20 {
-		t.Fatalf("docs=%d", len(docs))
+	if bulkDocs < 50 {
+		t.Fatalf("expected many bulk docs, got %d", bulkDocs)
 	}
-
-	// put error status
-	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "nope", 400)
-	}))
-	defer bad.Close()
-	if err := run(bad.URL, false); err == nil {
-		t.Fatal("expected error")
+	if aliases == 0 {
+		t.Fatal("expected alias call")
 	}
 }
 
-func TestPutMarshal(t *testing.T) {
-	// invalid body that can't marshal - channels
-	// use a server that returns body
+func TestSeedMainAndHelpers(t *testing.T) {
+	if err := seedMain([]string{"-h"}); err == nil {
+		// help returns error from flag set
+	}
+	if err := seedMain([]string{"-nope"}); err == nil {
+		t.Fatal("expected flag error")
+	}
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var m map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&m)
-		_, _ = w.Write([]byte(`{}`))
+		if r.URL.Path == "/_bulk" {
+			_, _ = w.Write([]byte(`{"errors":true,"items":[{"index":{"error":"x"}}]}`))
+			return
+		}
+		if r.Method == http.MethodPut {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		if r.Method == http.MethodPost {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(404)
+			return
+		}
+		http.NotFound(w, r)
 	}))
 	defer srv.Close()
-	client := srv.Client()
-	if err := put(client, srv.URL+"/x", map[string]any{"a": 1}); err != nil {
-		t.Fatal(err)
+
+	oldOut := seedStdout
+	seedStdout = ioDiscard{}
+	t.Cleanup(func() { seedStdout = oldOut })
+
+	// products create ok then bulk fails
+	if err := run(srv.URL, false); err == nil {
+		t.Fatal("expected bulk errors")
 	}
+
+	if err := put(http.DefaultClient, "://bad", map[string]any{}); err == nil {
+		t.Fatal("bad url")
+	}
+	if err := put(http.DefaultClient, "http://127.0.0.1:1", map[string]any{"ch": make(chan int)}); err == nil {
+		t.Fatal("marshal")
+	}
+	if truncate("hi", 10) != "hi" || !strings.HasSuffix(truncate(strings.Repeat("x", 50), 10), "...") {
+		t.Fatal("truncate")
+	}
+	_ = flag.ErrHelp
+	_ = json.Number("1")
 }
+
+type ioDiscard struct{}
+
+func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
