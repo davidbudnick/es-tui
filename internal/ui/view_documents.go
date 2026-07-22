@@ -36,7 +36,7 @@ func (m Model) viewDocuments() string {
 		Render(rightContent)
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
-	help := helpStyle.Render("j/k:nav  enter:view  e:edit  d:del  /:query  D:bulk  r:refresh  q:back")
+	help := helpStyle.Render("j/k:nav  enter:view  e:edit  d:del  /:search  y:copy  n/p:page  D:bulk  r:reload  q:back")
 	return content + "\n" + help
 }
 
@@ -119,10 +119,12 @@ func (m Model) buildDocumentsListPanel(width int) string {
 		b.WriteString("\n")
 	}
 
-	if len(m.Documents) > maxVisible || m.DocTotal > int64(len(m.Documents)) {
-		b.WriteString("\n")
-		b.WriteString(dimStyle.Render(fmt.Sprintf("%d-%d of %d", start+1, end, m.DocTotal)))
+	from := m.DocFrom
+	if from < 0 {
+		from = 0
 	}
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render(fmt.Sprintf("%d-%d of %d  (n/p page)", from+start+1, from+end, m.DocTotal)))
 	return b.String()
 }
 

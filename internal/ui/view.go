@@ -91,7 +91,7 @@ func (m Model) render() string {
 		types.ScreenIndexCreate, types.ScreenBulkDelete, types.ScreenEditDocument,
 		types.ScreenDocumentDetail, types.ScreenIndexDetail:
 		vPos = lipgloss.Center
-	case types.ScreenIndices, types.ScreenDocuments:
+	case types.ScreenIndices, types.ScreenDocuments, types.ScreenSearch:
 		hPos = lipgloss.Left
 		vPos = lipgloss.Top
 	}
@@ -130,52 +130,6 @@ func (m Model) getStatusBar() string {
 	return strings.Join(parts, "  ·  ")
 }
 
-func (m Model) viewSearch() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("Search"))
-	idx := m.SearchIndex
-	if idx == "" {
-		idx = "*"
-	}
-	b.WriteString(dimStyle.Render("Index: ") + idx + "\n")
-	if m.Inputs != nil {
-		b.WriteString(dimStyle.Render("Query: ") + m.Inputs.SearchInput.View())
-		b.WriteString("\n")
-	}
-	if m.SearchResult != nil {
-		r := m.SearchResult
-		b.WriteString(dimStyle.Render(fmt.Sprintf("took %dms · total %d (%s) · hits %d", r.Took, r.Total, r.TotalRel, len(r.Hits))))
-		b.WriteString("\n")
-		header := fmt.Sprintf("  %-24s %-36s %8s", "INDEX", "ID", "SCORE")
-		b.WriteString(headerStyle.Render(header))
-		b.WriteString("\n")
-		b.WriteString(dimStyle.Render(strings.Repeat("─", min(max(m.Width-4, 40), 72))))
-		b.WriteString("\n")
-
-		if len(r.Hits) > 0 {
-			maxVisible := max(m.Height-12, 5)
-			selectedIdx := clamp(m.SelectedDocIdx, 0, len(r.Hits)-1)
-			start := 0
-			if selectedIdx >= maxVisible {
-				start = selectedIdx - maxVisible + 1
-			}
-			end := min(start+maxVisible, len(r.Hits))
-			for i := start; i < end; i++ {
-				hit := r.Hits[i]
-				line := fmt.Sprintf("%-24s %-36s %8.3f", truncate(hit.Index, 24), truncate(hit.ID, 36), hit.Score)
-				if i == selectedIdx {
-					b.WriteString(selectedRowStyle.Render("▶ " + line))
-				} else {
-					b.WriteString(normalStyle.Render("  " + line))
-				}
-				b.WriteString("\n")
-			}
-		}
-	}
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("enter:run  j/k:nav  q:back"))
-	return b.String()
-}
 
 func (m Model) viewClusterHealth() string {
 	h := m.ClusterHealth
@@ -655,25 +609,35 @@ func (m Model) viewHelp() string {
 		}},
 		{"Indices", [][2]string{
 			{"enter", "Browse documents"},
+			{"/", "Search (split pane)"},
 			{"i", "Index detail"},
+			{"O", "Open index"},
+			{"X", "Close index"},
+			{"u", "Refresh index"},
+			{"M", "Force-merge"},
 			{"a", "Create index"},
 			{"d", "Delete index"},
-			{"/", "Search"},
 			{"c", "Cluster health"},
 			{"n", "Nodes"},
 			{"m", "Live metrics"},
-			{"s", "Shards"},
-			{"A", "Aliases"},
-			{"T", "Templates"},
-			{"C", "Cat API"},
-			{"*", "Toggle favorite"},
-			{"F", "Favorites"},
-			{"R", "Recent"},
+			{"*", "Favorite"},
+		}},
+		{"Search", [][2]string{
+			{"enter", "Run query / open hit"},
+			{"j/k", "Move hits"},
+			{"n/p", "Next / prev page"},
+			{"y", "Copy JSON"},
+			{"↑/↓", "Query history (in input)"},
+			{"tab", "Toggle query/results focus"},
 		}},
 		{"Documents", [][2]string{
 			{"enter", "Open document"},
-			{"e", "Edit / index doc"},
-			{"d", "Delete document"},
+			{"/", "Full search"},
+			{"f", "Inline filter"},
+			{"y", "Copy JSON"},
+			{"n/p", "Page"},
+			{"e", "Edit / index"},
+			{"d", "Delete"},
 			{"D", "Bulk delete-by-query"},
 		}},
 	}

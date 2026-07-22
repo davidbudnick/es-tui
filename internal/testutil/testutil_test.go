@@ -92,6 +92,7 @@ func TestMockESFull(t *testing.T) {
 	AssertNoError(t, m.RefreshIndex("products"))
 	AssertNoError(t, m.OpenIndex("products"))
 	AssertNoError(t, m.CloseIndex("products"))
+	AssertNoError(t, m.ForceMerge("products", 1))
 
 	sr, err := m.Search("products", "*", 0, 10)
 	AssertNoError(t, err)

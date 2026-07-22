@@ -5,6 +5,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 	"github.com/davidbudnick/es-tui/internal/service"
 	"github.com/davidbudnick/es-tui/internal/types"
 )
@@ -313,5 +314,41 @@ func (c *Commands) RefreshIndex(name string) tea.Cmd {
 		}
 		indices, err := c.es.ListIndices("*")
 		return types.IndicesLoadedMsg{Indices: indices, Err: err}
+	}
+}
+
+// RefreshIndexOnly refreshes an index without reloading the index list.
+func (c *Commands) RefreshIndexOnly(name string) tea.Cmd {
+	return func() tea.Msg {
+		return types.IndexOpMsg{Op: "refresh", Index: name, Err: c.es.RefreshIndex(name)}
+	}
+}
+
+// OpenIndex opens a closed index.
+func (c *Commands) OpenIndex(name string) tea.Cmd {
+	return func() tea.Msg {
+		return types.IndexOpMsg{Op: "open", Index: name, Err: c.es.OpenIndex(name)}
+	}
+}
+
+// CloseIndex closes an open index.
+func (c *Commands) CloseIndex(name string) tea.Cmd {
+	return func() tea.Msg {
+		return types.IndexOpMsg{Op: "close", Index: name, Err: c.es.CloseIndex(name)}
+	}
+}
+
+// ForceMerge force-merges an index.
+func (c *Commands) ForceMerge(name string) tea.Cmd {
+	return func() tea.Msg {
+		return types.IndexOpMsg{Op: "forcemerge", Index: name, Err: c.es.ForceMerge(name, 0)}
+	}
+}
+
+// CopyToClipboard writes content to the system clipboard.
+func (c *Commands) CopyToClipboard(content string) tea.Cmd {
+	return func() tea.Msg {
+		err := clipboard.WriteAll(content)
+		return types.ClipboardCopiedMsg{Content: content, Err: err}
 	}
 }

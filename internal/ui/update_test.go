@@ -462,7 +462,7 @@ func TestKeyHandlersFormsAndDocs(t *testing.T) {
 	m = applyKey(m, "k")
 	m = applyKey(m, "enter")
 	m.Screen = types.ScreenDocuments
-	m = applyKey(m, "/")
+	m = applyKey(m, "f")
 	m = applyKey(m, "esc")
 	m = applyKey(m, "e")
 	if m.Screen != types.ScreenEditDocument {

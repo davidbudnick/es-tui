@@ -225,6 +225,56 @@ func TestCommandsAll(t *testing.T) {
 	if m, ok := msg.(types.IndicesLoadedMsg); !ok || m.Err == nil {
 		t.Fatal(msg)
 	}
+	mock.RefreshErr = nil
+
+	msg = c.RefreshIndexOnly("products")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err != nil || m.Op != "refresh" {
+		t.Fatal(msg)
+	}
+	mock.RefreshErr = errors.New("r")
+	msg = c.RefreshIndexOnly("products")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	mock.RefreshErr = nil
+
+	msg = c.OpenIndex("products")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err != nil || m.Op != "open" {
+		t.Fatal(msg)
+	}
+	mock.OpenErr = errors.New("o")
+	msg = c.OpenIndex("products")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	mock.OpenErr = nil
+
+	msg = c.CloseIndex("products")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err != nil || m.Op != "close" {
+		t.Fatal(msg)
+	}
+	mock.CloseErr = errors.New("c")
+	msg = c.CloseIndex("products")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	mock.CloseErr = nil
+
+	msg = c.ForceMerge("products")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err != nil || m.Op != "forcemerge" {
+		t.Fatal(msg)
+	}
+	mock.ForceMergeErr = errors.New("f")
+	msg = c.ForceMerge("products")()
+	if m, ok := msg.(types.IndexOpMsg); !ok || m.Err == nil {
+		t.Fatal(msg)
+	}
+	mock.ForceMergeErr = nil
+
+	msg = c.CopyToClipboard("hello")()
+	if m, ok := msg.(types.ClipboardCopiedMsg); !ok || m.Content != "hello" {
+		t.Fatal(msg)
+	}
 
 	msg = c.DeleteConnection(conn.ID)()
 	if m, ok := msg.(types.ConnectionDeletedMsg); !ok || m.Err != nil {

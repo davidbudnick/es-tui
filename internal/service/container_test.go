@@ -63,6 +63,7 @@ func (s *stubES) GetIndexMappings(string) (string, error)        { return "", ni
 func (s *stubES) RefreshIndex(string) error                      { return nil }
 func (s *stubES) OpenIndex(string) error                         { return nil }
 func (s *stubES) CloseIndex(string) error                        { return nil }
+func (s *stubES) ForceMerge(string, int) error                   { return nil }
 func (s *stubES) Search(string, string, int, int) (types.SearchResult, error) {
 	return types.SearchResult{}, nil
 }

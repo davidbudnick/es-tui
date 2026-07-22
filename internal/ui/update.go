@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -238,6 +239,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Documents = r.Hits
 		m.DocTotal = r.Total
 		m.SelectedDocIdx = 0
+		m.SearchFocus = "results"
+		if m.Screen != types.ScreenSearch && m.Screen != types.ScreenDocuments {
+			m.Screen = types.ScreenSearch
+		}
+		return m, nil
+
+	case types.IndexOpMsg:
+		m.Loading = false
+		if msg.Err != nil {
+			m.Err = msg.Err
+			return m, nil
+		}
+		m.StatusMsg = fmt.Sprintf("%s %s", msg.Op, msg.Index)
+		if m.Cmds != nil {
+			return m, m.Cmds.LoadIndices(patternOrAll(m))
+		}
+		return m, nil
+
+	case types.ClipboardCopiedMsg:
+		if msg.Err != nil {
+			m.Err = msg.Err
+			return m, nil
+		}
+		m.StatusMsg = "Copied to clipboard"
 		return m, nil
 
 	case types.ClusterHealthLoadedMsg:
@@ -682,7 +707,6 @@ func (m Model) handleIndicesKeys(key string, msg tea.KeyPressMsg) (tea.Model, te
 			m.SelectedIndexIdx = len(m.Indices) - 1
 		}
 	case "f", "/":
-		// f = filter, / = search console from indices
 		if key == "f" && m.Inputs != nil {
 			m.Inputs.PatternInput.Focus()
 			return m, nil
@@ -692,7 +716,10 @@ func (m Model) handleIndicesKeys(key string, msg tea.KeyPressMsg) (tea.Model, te
 			m.SearchIndex = m.Indices[m.SelectedIndexIdx].Name
 		}
 		m.Screen = types.ScreenSearch
+		m.SearchFocus = "query"
+		m.SearchFrom = 0
 		if m.Inputs != nil {
+			m.Inputs.SearchInput.SetValue("")
 			m.Inputs.SearchInput.Focus()
 		}
 	case "r":
@@ -700,6 +727,34 @@ func (m Model) handleIndicesKeys(key string, msg tea.KeyPressMsg) (tea.Model, te
 			m.Loading = true
 			return m, m.Cmds.LoadIndices(patternOrAll(m))
 		}
+	case "O":
+		// open index
+		if len(m.Indices) == 0 || m.Cmds == nil {
+			return m, nil
+		}
+		m.Loading = true
+		return m, m.Cmds.OpenIndex(m.Indices[m.SelectedIndexIdx].Name)
+	case "X":
+		// close index
+		if len(m.Indices) == 0 || m.Cmds == nil {
+			return m, nil
+		}
+		m.Loading = true
+		return m, m.Cmds.CloseIndex(m.Indices[m.SelectedIndexIdx].Name)
+	case "u":
+		// refresh selected index
+		if len(m.Indices) == 0 || m.Cmds == nil {
+			return m, nil
+		}
+		m.Loading = true
+		return m, m.Cmds.RefreshIndexOnly(m.Indices[m.SelectedIndexIdx].Name)
+	case "M":
+		// force-merge
+		if len(m.Indices) == 0 || m.Cmds == nil {
+			return m, nil
+		}
+		m.Loading = true
+		return m, m.Cmds.ForceMerge(m.Indices[m.SelectedIndexIdx].Name)
 	case "a":
 		m.Screen = types.ScreenIndexCreate
 		if m.Inputs != nil {
@@ -731,7 +786,12 @@ func (m Model) handleIndicesKeys(key string, msg tea.KeyPressMsg) (tea.Model, te
 		}
 		m.Loading = true
 		m.DocQuery = ""
-		return m, m.Cmds.LoadDocuments(idx.Name, "", 0, 50)
+		m.DocFrom = 0
+		pageSize := m.PageSize
+		if pageSize <= 0 {
+			pageSize = 50
+		}
+		return m, m.Cmds.LoadDocuments(idx.Name, "", 0, pageSize)
 	case "c":
 		if m.Cmds != nil {
 			m.Loading = true
@@ -880,8 +940,18 @@ func (m Model) handleDocumentsKeys(key string, msg tea.KeyPressMsg) (tea.Model, 
 		doc := m.Documents[m.SelectedDocIdx]
 		m.Loading = true
 		return m, m.Cmds.LoadDocument(doc.Index, doc.ID)
-	case "/":
+	case "f":
 		if m.Inputs != nil {
+			m.Inputs.SearchInput.Focus()
+		}
+	case "/":
+		if m.CurrentIndex != nil {
+			m.SearchIndex = m.CurrentIndex.Name
+		}
+		m.Screen = types.ScreenSearch
+		m.SearchFocus = "query"
+		if m.Inputs != nil {
+			m.Inputs.SearchInput.SetValue(m.DocQuery)
 			m.Inputs.SearchInput.Focus()
 		}
 	case "e":
@@ -912,8 +982,49 @@ func (m Model) handleDocumentsKeys(key string, msg tea.KeyPressMsg) (tea.Model, 
 	case "r":
 		if m.Cmds != nil && m.CurrentIndex != nil {
 			m.Loading = true
-			return m, m.Cmds.LoadDocuments(m.CurrentIndex.Name, m.DocQuery, 0, 50)
+			pageSize := m.PageSize
+			if pageSize <= 0 {
+				pageSize = 50
+			}
+			return m, m.Cmds.LoadDocuments(m.CurrentIndex.Name, m.DocQuery, m.DocFrom, pageSize)
 		}
+	case "n":
+		if m.Cmds == nil || m.CurrentIndex == nil {
+			return m, nil
+		}
+		pageSize := m.PageSize
+		if pageSize <= 0 {
+			pageSize = 50
+		}
+		m.DocFrom += pageSize
+		m.Loading = true
+		return m, m.Cmds.LoadDocuments(m.CurrentIndex.Name, m.DocQuery, m.DocFrom, pageSize)
+	case "p":
+		if m.Cmds == nil || m.CurrentIndex == nil {
+			return m, nil
+		}
+		pageSize := m.PageSize
+		if pageSize <= 0 {
+			pageSize = 50
+		}
+		m.DocFrom -= pageSize
+		if m.DocFrom < 0 {
+			m.DocFrom = 0
+		}
+		m.Loading = true
+		return m, m.Cmds.LoadDocuments(m.CurrentIndex.Name, m.DocQuery, m.DocFrom, pageSize)
+	case "y":
+		if len(m.Documents) == 0 || m.Cmds == nil {
+			return m, nil
+		}
+		doc := m.Documents[clamp(m.SelectedDocIdx, 0, len(m.Documents)-1)]
+		content := doc.Raw
+		if content == "" && doc.Source != nil {
+			if b, err := json.MarshalIndent(doc.Source, "", "  "); err == nil {
+				content = string(b)
+			}
+		}
+		return m, m.Cmds.CopyToClipboard(content)
 	}
 	return m, nil
 }
@@ -943,22 +1054,62 @@ func (m Model) handleDocumentDetailKeys(key string) (tea.Model, tea.Cmd) {
 			m.ConfirmData = *m.CurrentDocument
 			m.Screen = types.ScreenConfirmDelete
 		}
+	case "y":
+		if m.CurrentDocument == nil || m.Cmds == nil {
+			return m, nil
+		}
+		content := m.CurrentDocument.Raw
+		if content == "" && m.CurrentDocument.Source != nil {
+			if b, err := json.MarshalIndent(m.CurrentDocument.Source, "", "  "); err == nil {
+				content = string(b)
+			}
+		}
+		return m, m.Cmds.CopyToClipboard(content)
 	}
 	return m, nil
 }
 
 func (m Model) handleSearchKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	pageSize := m.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+
 	if m.Inputs != nil && m.Inputs.SearchInput.Focused() {
 		switch key {
 		case "esc":
 			m.Inputs.SearchInput.Blur()
-			m.Screen = types.ScreenIndices
+			m.SearchFocus = "results"
 			return m, nil
 		case "enter":
 			m.Inputs.SearchInput.Blur()
+			m.SearchFocus = "results"
+			q := m.Inputs.SearchInput.Value()
+			m.SearchQuery = q
+			m.pushQueryHistory(q)
+			m.SearchFrom = 0
 			if m.Cmds != nil {
 				m.Loading = true
-				return m, m.Cmds.Search(m.SearchIndex, m.Inputs.SearchInput.Value(), 0, 50)
+				return m, m.Cmds.Search(m.SearchIndex, q, 0, pageSize)
+			}
+			return m, nil
+		case "up":
+			// history
+			if len(m.QueryHistory) == 0 {
+				return m, nil
+			}
+			if m.HistoryIdx < len(m.QueryHistory)-1 {
+				m.HistoryIdx++
+				m.Inputs.SearchInput.SetValue(m.QueryHistory[m.HistoryIdx])
+			}
+			return m, nil
+		case "down":
+			if m.HistoryIdx > 0 {
+				m.HistoryIdx--
+				m.Inputs.SearchInput.SetValue(m.QueryHistory[m.HistoryIdx])
+			} else if m.HistoryIdx == 0 {
+				m.HistoryIdx = -1
+				m.Inputs.SearchInput.SetValue("")
 			}
 			return m, nil
 		default:
@@ -967,29 +1118,120 @@ func (m Model) handleSearchKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea
 			return m, cmd
 		}
 	}
+
 	switch key {
 	case "esc", "q":
-		m.Screen = types.ScreenIndices
-	case "enter":
+		if m.CurrentIndex != nil {
+			m.Screen = types.ScreenDocuments
+		} else {
+			m.Screen = types.ScreenIndices
+		}
+	case "/", "enter":
+		if key == "enter" && m.SearchResult != nil && len(m.SearchResult.Hits) > 0 && m.SearchFocus == "results" {
+			// open selected hit
+			if m.Cmds != nil {
+				doc := m.SearchResult.Hits[clamp(m.SelectedDocIdx, 0, len(m.SearchResult.Hits)-1)]
+				m.Loading = true
+				return m, m.Cmds.LoadDocument(doc.Index, doc.ID)
+			}
+		}
 		if m.Inputs != nil {
+			m.SearchFocus = "query"
 			m.Inputs.SearchInput.Focus()
 		}
+	case "tab":
+		if m.SearchFocus == "query" {
+			m.SearchFocus = "results"
+			if m.Inputs != nil {
+				m.Inputs.SearchInput.Blur()
+			}
+		} else {
+			m.SearchFocus = "query"
+			if m.Inputs != nil {
+				m.Inputs.SearchInput.Focus()
+			}
+		}
 	case "j", "down":
-		if len(m.Documents) > 0 {
-			m.SelectedDocIdx = (m.SelectedDocIdx + 1) % len(m.Documents)
+		hits := searchHits(m)
+		if len(hits) > 0 {
+			m.SelectedDocIdx = (m.SelectedDocIdx + 1) % len(hits)
 		}
 	case "k", "up":
-		if len(m.Documents) > 0 {
-			m.SelectedDocIdx = (m.SelectedDocIdx - 1 + len(m.Documents)) % len(m.Documents)
+		hits := searchHits(m)
+		if len(hits) > 0 {
+			m.SelectedDocIdx = (m.SelectedDocIdx - 1 + len(hits)) % len(hits)
+		}
+	case "g", "home":
+		m.SelectedDocIdx = 0
+	case "G", "end":
+		hits := searchHits(m)
+		if len(hits) > 0 {
+			m.SelectedDocIdx = len(hits) - 1
 		}
 	case "o":
-		if len(m.Documents) > 0 && m.Cmds != nil {
-			doc := m.Documents[m.SelectedDocIdx]
+		hits := searchHits(m)
+		if len(hits) > 0 && m.Cmds != nil {
+			doc := hits[clamp(m.SelectedDocIdx, 0, len(hits)-1)]
 			m.Loading = true
 			return m, m.Cmds.LoadDocument(doc.Index, doc.ID)
 		}
+	case "y":
+		hits := searchHits(m)
+		if len(hits) == 0 || m.Cmds == nil {
+			return m, nil
+		}
+		doc := hits[clamp(m.SelectedDocIdx, 0, len(hits)-1)]
+		content := doc.Raw
+		if content == "" && doc.Source != nil {
+			if b, err := json.MarshalIndent(doc.Source, "", "  "); err == nil {
+				content = string(b)
+			}
+		}
+		return m, m.Cmds.CopyToClipboard(content)
+	case "n":
+		if m.Cmds == nil {
+			return m, nil
+		}
+		m.SearchFrom += pageSize
+		m.Loading = true
+		q := m.SearchQuery
+		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
+			q = m.Inputs.SearchInput.Value()
+		}
+		return m, m.Cmds.Search(m.SearchIndex, q, m.SearchFrom, pageSize)
+	case "p":
+		if m.Cmds == nil {
+			return m, nil
+		}
+		m.SearchFrom -= pageSize
+		if m.SearchFrom < 0 {
+			m.SearchFrom = 0
+		}
+		m.Loading = true
+		q := m.SearchQuery
+		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
+			q = m.Inputs.SearchInput.Value()
+		}
+		return m, m.Cmds.Search(m.SearchIndex, q, m.SearchFrom, pageSize)
+	case "r":
+		if m.Cmds == nil {
+			return m, nil
+		}
+		m.Loading = true
+		q := m.SearchQuery
+		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
+			q = m.Inputs.SearchInput.Value()
+		}
+		return m, m.Cmds.Search(m.SearchIndex, q, m.SearchFrom, pageSize)
 	}
 	return m, nil
+}
+
+func searchHits(m Model) []types.Document {
+	if m.SearchResult != nil && len(m.SearchResult.Hits) > 0 {
+		return m.SearchResult.Hits
+	}
+	return m.Documents
 }
 
 func (m Model) handleConfirmDeleteKeys(key string) (tea.Model, tea.Cmd) {

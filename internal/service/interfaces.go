@@ -65,6 +65,7 @@ type ESService interface {
 	RefreshIndex(name string) error
 	OpenIndex(name string) error
 	CloseIndex(name string) error
+	ForceMerge(name string, maxNumSegments int) error
 
 	// Documents
 	Search(index, query string, from, size int) (types.SearchResult, error)

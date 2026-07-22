@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/textinput"
 	"github.com/davidbudnick/es-tui/internal/cmd"
 	"github.com/davidbudnick/es-tui/internal/types"
@@ -36,10 +38,16 @@ type Model struct {
 	DocFrom         int
 	DocTotal        int64
 	DetailScroll    int
+	PageSize        int
 
-	SearchQuery  string
-	SearchResult *types.SearchResult
-	SearchIndex  string
+	SearchQuery    string
+	SearchResult   *types.SearchResult
+	SearchIndex    string
+	SearchFrom     int
+	SearchFocus    string // "query" | "results"
+	QueryHistory   []string
+	HistoryIdx     int
+
 
 	ClusterHealth types.ClusterHealth
 	Nodes         []types.NodeInfo
@@ -94,15 +102,19 @@ type ModelInputs struct {
 // NewModel creates a default model.
 func NewModel() Model {
 	return Model{
-		Screen:      types.ScreenConnections,
-		Connections: []types.Connection{},
-		ConnInputs:  createConnectionInputs(),
-		KeyBindings: types.DefaultKeyBindings(),
-		Indices:     []types.IndexInfo{},
-		Documents:   []types.Document{},
+		Screen:       types.ScreenConnections,
+		Connections:  []types.Connection{},
+		ConnInputs:   createConnectionInputs(),
+		KeyBindings:  types.DefaultKeyBindings(),
+		Indices:      []types.IndexInfo{},
+		Documents:    []types.Document{},
+		PageSize:     50,
+		SearchFocus:  "query",
+		QueryHistory: []string{},
+		HistoryIdx:   -1,
 		Inputs: &ModelInputs{
 			PatternInput:    createTextInput("Filter indices (e.g. logs-*)...", 40),
-			SearchInput:     createTextInput("Query string or JSON body...", 60),
+			SearchInput:     createTextInput("query_string or {\"query\":{...}} JSON", 80),
 			IndexNameInput:  createTextInput("Index name", 40),
 			IndexBodyInput:  createTextInput("Optional settings JSON {}", 50),
 			DocBodyInput:    createTextInput("Document JSON body", 60),
@@ -111,6 +123,22 @@ func NewModel() Model {
 			CatInput:        createTextInput("Cat endpoint (e.g. indices, shards, nodes)", 40),
 		},
 	}
+}
+
+func (m *Model) pushQueryHistory(q string) {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return
+	}
+	// de-dupe head
+	if len(m.QueryHistory) > 0 && m.QueryHistory[0] == q {
+		return
+	}
+	m.QueryHistory = append([]string{q}, m.QueryHistory...)
+	if len(m.QueryHistory) > 30 {
+		m.QueryHistory = m.QueryHistory[:30]
+	}
+	m.HistoryIdx = -1
 }
 
 func createTextInput(placeholder string, width int) textinput.Model {

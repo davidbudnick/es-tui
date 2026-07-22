@@ -159,6 +159,12 @@ type ClipboardCopiedMsg struct {
 	Err     error
 }
 
+type IndexOpMsg struct {
+	Op    string
+	Index string
+	Err   error
+}
+
 type UpdateAvailableMsg struct {
 	LatestVersion string
 	UpgradeCmd    string

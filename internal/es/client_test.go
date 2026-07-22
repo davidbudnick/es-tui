@@ -201,7 +201,7 @@ func TestClientConnectAndBasics(t *testing.T) {
 			_, _ = w.Write([]byte(`{"products":{"settings":{}}}`))
 		case strings.HasSuffix(r.URL.Path, "/_mapping"):
 			_, _ = w.Write([]byte(`{"products":{"mappings":{}}}`))
-		case strings.HasSuffix(r.URL.Path, "/_refresh") || strings.HasSuffix(r.URL.Path, "/_open") || strings.HasSuffix(r.URL.Path, "/_close"):
+		case strings.HasSuffix(r.URL.Path, "/_refresh") || strings.HasSuffix(r.URL.Path, "/_open") || strings.HasSuffix(r.URL.Path, "/_close") || strings.HasSuffix(r.URL.Path, "/_forcemerge"):
 			_, _ = w.Write([]byte(`{"acknowledged":true}`))
 		case strings.Contains(r.URL.Path, "/_search") || r.URL.Path == "/_search":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -337,6 +337,12 @@ func TestClientConnectAndBasics(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := c.CloseIndex("products"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ForceMerge("products", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ForceMerge("products", 1); err != nil {
 		t.Fatal(err)
 	}
 

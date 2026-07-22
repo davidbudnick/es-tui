@@ -44,6 +44,7 @@ type MockES struct {
 	RefreshErr    error
 	OpenErr       error
 	CloseErr      error
+	ForceMergeErr error
 	SearchResult  types.SearchResult
 	SearchErr     error
 	Document      types.Document
@@ -213,6 +214,12 @@ func (m *MockES) CloseIndex(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.CloseErr
+}
+
+func (m *MockES) ForceMerge(name string, maxNumSegments int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ForceMergeErr
 }
 
 func (m *MockES) Search(index, query string, from, size int) (types.SearchResult, error) {

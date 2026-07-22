@@ -541,6 +541,16 @@ func (c *Client) CloseIndex(name string) error {
 	return err
 }
 
+// ForceMerge force-merges an index. Omits max_num_segments when maxNumSegments <= 0.
+func (c *Client) ForceMerge(name string, maxNumSegments int) error {
+	path := "/" + url.PathEscape(name) + "/_forcemerge"
+	if maxNumSegments > 0 {
+		path += "?max_num_segments=" + strconv.Itoa(maxNumSegments)
+	}
+	_, _, err := c.do("POST", path, nil)
+	return err
+}
+
 // Search runs a search query. query may be a simple string (query_string) or full JSON body.
 func (c *Client) Search(index, query string, from, size int) (types.SearchResult, error) {
 	if size <= 0 {
