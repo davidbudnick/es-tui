@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/davidbudnick/es-tui/internal/types"
 )
 
 func (m Model) viewIndices() string {
@@ -32,7 +31,7 @@ func (m Model) viewIndices() string {
 		Height(panelHeight).
 		Padding(0, 1).
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(lipgloss.Color(colorBorder)).
+		BorderForeground(lipgloss.Color("240")).
 		Render(rightContent)
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
@@ -53,15 +52,11 @@ func (m Model) buildIndicesListPanel(width int) string {
 
 	connInfo := ""
 	if m.CurrentConn != nil {
-		connInfo = fmt.Sprintf(" · %s", m.CurrentConn.Name)
+		connInfo = " - " + m.CurrentConn.Name
 	}
-	flavor := string(m.Flavor)
-	if flavor == "" {
-		flavor = "cluster"
-	}
-	title := fmt.Sprintf("Indices%s  %s", connInfo, dimStyle.Render(flavor))
+	title := "Indices" + connInfo
 	if len(m.Indices) > 0 {
-		title += fmt.Sprintf("  [%d]", len(m.Indices))
+		title += fmt.Sprintf(" [%d]", len(m.Indices))
 	}
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
@@ -87,17 +82,18 @@ func (m Model) buildIndicesListPanel(width int) string {
 		return b.String()
 	}
 
-	healthW, statusW, docsW, sizeW := 7, 8, 10, 8
-	nameW := width - healthW - statusW - docsW - sizeW - 10
-	if nameW < 16 {
-		nameW = 16
+	// Columns: name flexible, health, status, docs, size (redis-style spacing)
+	healthW, statusW, docsW, sizeW := 8, 8, 8, 8
+	nameW := width - healthW - statusW - docsW - sizeW - 12
+	if nameW < 18 {
+		nameW = 18
 	}
 
-	header := fmt.Sprintf("  %-*s  %-*s  %-*s  %*s  %*s",
-		nameW, "INDEX", healthW, "HEALTH", statusW, "STATUS", docsW, "DOCS", sizeW, "SIZE")
+	header := fmt.Sprintf("  %-*s  %-*s  %-*s  %*s  %s",
+		nameW, "Index", healthW, "Health", statusW, "Status", docsW, "Docs", "Size")
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render(strings.Repeat("─", min(width, 80))))
+	b.WriteString(dimStyle.Render(strings.Repeat("─", min(width, nameW+healthW+statusW+docsW+sizeW+16))))
 	b.WriteString("\n")
 
 	maxVisible := max(m.Height-12, 5)
@@ -114,30 +110,50 @@ func (m Model) buildIndicesListPanel(width int) string {
 	for i := start; i < end; i++ {
 		idx := m.Indices[i]
 		name := truncate(idx.Name, nameW)
-		plain := fmt.Sprintf("%-*s  %-*s  %-*s  %*d  %*s",
-			nameW, name, healthW, idx.Health, statusW, idx.Status, docsW, idx.DocsCount, sizeW, idx.StoreSize)
+		docsStr := fmt.Sprintf("%d", idx.DocsCount)
+		sizeStr := idx.StoreSize
+		if sizeStr == "" {
+			sizeStr = "-"
+		}
+
 		if i == selectedIdx {
-			b.WriteString(selectedRowStyle.Render("▶ " + plain))
+			// Blue selection band on cursor + name (redis pattern)
+			b.WriteString(selectedStyle.Render("▶ "))
+			b.WriteString(selectedStyle.Render(fmt.Sprintf("%-*s", nameW, name)))
+			b.WriteString("  ")
+			b.WriteString(healthStyleBold(idx.Health).Render(fmt.Sprintf("%-*s", healthW, idx.Health)))
+			b.WriteString("  ")
+			b.WriteString(indexStatusStyleBold(idx.Status).Render(fmt.Sprintf("%-*s", statusW, idx.Status)))
+			b.WriteString("  ")
+			b.WriteString(normalStyle.Render(fmt.Sprintf("%*s", docsW, docsStr)))
+			b.WriteString("  ")
+			b.WriteString(normalStyle.Render(sizeStr))
 		} else {
-			prefix := normalStyle.Render("  ")
-			namePart := normalStyle.Render(fmt.Sprintf("%-*s  ", nameW, name))
-			hPart := healthStyle(idx.Health).Render(fmt.Sprintf("%-*s", healthW, idx.Health))
-			rest := normalStyle.Render(fmt.Sprintf("  %-*s  %*d  %*s", statusW, idx.Status, docsW, idx.DocsCount, sizeW, idx.StoreSize))
-			b.WriteString(prefix + namePart + hPart + rest)
+			b.WriteString("  ")
+			b.WriteString(normalStyle.Render(fmt.Sprintf("%-*s", nameW, name)))
+			b.WriteString("  ")
+			b.WriteString(healthStyle(idx.Health).Render(fmt.Sprintf("%-*s", healthW, idx.Health)))
+			b.WriteString("  ")
+			b.WriteString(indexStatusStyle(idx.Status).Render(fmt.Sprintf("%-*s", statusW, idx.Status)))
+			b.WriteString("  ")
+			b.WriteString(dimStyle.Render(fmt.Sprintf("%*s", docsW, docsStr)))
+			b.WriteString("  ")
+			b.WriteString(dimStyle.Render(sizeStr))
 		}
 		b.WriteString("\n")
 	}
 
 	if len(m.Indices) > maxVisible {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("\nShowing %d-%d of %d", start+1, end, len(m.Indices))))
-	} else {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("\n%d indices", len(m.Indices))))
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render(fmt.Sprintf("%d-%d of %d", start+1, end, len(m.Indices))))
 	}
+
 	return b.String()
 }
 
 func (m Model) buildIndexPreviewPanel(width int) string {
 	var b strings.Builder
+
 	b.WriteString(titleStyle.Render("Preview"))
 	b.WriteString("\n")
 	b.WriteString(dimStyle.Render(strings.Repeat("─", max(width, 8))))
@@ -150,38 +166,47 @@ func (m Model) buildIndexPreviewPanel(width int) string {
 	selectedIdx := clamp(m.SelectedIndexIdx, 0, len(m.Indices)-1)
 	idx := m.Indices[selectedIdx]
 
-	b.WriteString(keyStyle.Render("Index: "))
 	name := idx.Name
-	if width > 10 && len(name) > width-8 {
+	if width > 12 && len(name) > width-8 {
 		name = name[:width-11] + "..."
 	}
+
+	b.WriteString(keyStyle.Render("Index: "))
 	b.WriteString(normalStyle.Render(name))
 	b.WriteString("\n\n")
 
 	b.WriteString(keyStyle.Render("Health: "))
-	b.WriteString(healthStyle(idx.Health).Render(idx.Health))
+	b.WriteString(healthStyleBold(idx.Health).Render(idx.Health))
 	b.WriteString("\n\n")
 
 	b.WriteString(keyStyle.Render("Status: "))
-	b.WriteString(normalStyle.Render(idx.Status))
+	b.WriteString(indexStatusStyleBold(idx.Status).Render(idx.Status))
 	b.WriteString("\n\n")
 
-	b.WriteString(keyStyle.Render("Docs: "))
+	b.WriteString(dimStyle.Render(strings.Repeat("─", max(width, 8))))
+	b.WriteString("\n\n")
+
+	b.WriteString(keyStyle.Render("Docs"))
+	b.WriteString("\n\n")
 	b.WriteString(normalStyle.Render(fmt.Sprintf("%d", idx.DocsCount)))
 	if idx.DocsDeleted > 0 {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  (%d deleted)", idx.DocsDeleted)))
 	}
 	b.WriteString("\n\n")
 
-	b.WriteString(keyStyle.Render("Shards: "))
-	b.WriteString(normalStyle.Render(fmt.Sprintf("%d primary / %d replica", idx.PrimaryShards, idx.ReplicaShards)))
-	b.WriteString("\n\n")
-
 	b.WriteString(keyStyle.Render("Store: "))
-	b.WriteString(normalStyle.Render(idx.StoreSize))
+	store := idx.StoreSize
+	if store == "" {
+		store = "-"
+	}
+	b.WriteString(normalStyle.Render(store))
 	if idx.PriStoreSize != "" {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  (pri %s)", idx.PriStoreSize)))
 	}
+	b.WriteString("\n\n")
+
+	b.WriteString(keyStyle.Render("Shards: "))
+	b.WriteString(normalStyle.Render(fmt.Sprintf("%d primary / %d replica", idx.PrimaryShards, idx.ReplicaShards)))
 	b.WriteString("\n\n")
 
 	if idx.UUID != "" {
@@ -190,15 +215,12 @@ func (m Model) buildIndexPreviewPanel(width int) string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(dimStyle.Render(strings.Repeat("─", max(width, 8))))
-	b.WriteString("\n\n")
-	b.WriteString(dimStyle.Render("enter browse docs"))
-	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("i full detail · s settings"))
 	if idx.IsFavorite {
-		b.WriteString("\n\n")
 		b.WriteString(yellowStyle.Render("★ favorited"))
+		b.WriteString("\n\n")
 	}
+
+	b.WriteString(dimStyle.Render("enter · browse docs"))
 	return b.String()
 }
 
@@ -221,10 +243,10 @@ func (m Model) viewIndexDetail() string {
 	meta.WriteString(normalStyle.Render(idx.Name))
 	meta.WriteString("\n")
 	meta.WriteString(keyStyle.Render(" Health: "))
-	meta.WriteString(healthStyle(idx.Health).Render(idx.Health))
+	meta.WriteString(healthStyleBold(idx.Health).Render(idx.Health))
 	meta.WriteString("  ")
 	meta.WriteString(keyStyle.Render("Status: "))
-	meta.WriteString(normalStyle.Render(idx.Status))
+	meta.WriteString(indexStatusStyleBold(idx.Status).Render(idx.Status))
 	meta.WriteString("\n")
 	meta.WriteString(keyStyle.Render("   Docs: "))
 	meta.WriteString(normalStyle.Render(fmt.Sprintf("%d", idx.DocsCount)))
@@ -244,6 +266,3 @@ func (m Model) viewIndexDetail() string {
 	b.WriteString(helpStyle.Render("enter docs · s settings · m mappings · / search · d delete · esc back"))
 	return b.String()
 }
-
-// silence unused import when types only used in signatures via indices
-var _ = types.IndexInfo{}

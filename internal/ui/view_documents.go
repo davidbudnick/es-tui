@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/davidbudnick/es-tui/internal/types"
 )
 
 func (m Model) viewDocuments() string {
@@ -33,7 +32,7 @@ func (m Model) viewDocuments() string {
 		Height(panelHeight).
 		Padding(0, 1).
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(lipgloss.Color(colorBorder)).
+		BorderForeground(lipgloss.Color("240")).
 		Render(rightContent)
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
@@ -56,9 +55,9 @@ func (m Model) buildDocumentsListPanel(width int) string {
 	if m.CurrentIndex != nil {
 		name = m.CurrentIndex.Name
 	}
-	title := fmt.Sprintf("Documents · %s", name)
+	title := "Documents - " + name
 	if m.DocTotal > 0 {
-		title += fmt.Sprintf("  [%d]", m.DocTotal)
+		title += fmt.Sprintf(" [%d]", m.DocTotal)
 	}
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
@@ -69,7 +68,7 @@ func (m Model) buildDocumentsListPanel(width int) string {
 	} else {
 		q := m.DocQuery
 		if q == "" {
-			q = "match_all"
+			q = "*"
 		}
 		b.WriteString(normalStyle.Render(truncate(q, max(width-10, 10))))
 	}
@@ -82,14 +81,16 @@ func (m Model) buildDocumentsListPanel(width int) string {
 		return b.String()
 	}
 
-	idW := width - 14
+	scoreW := 8
+	idW := width - scoreW - 8
 	if idW < 16 {
 		idW = 16
 	}
-	header := fmt.Sprintf("  %-*s  %s", idW, "ID", "SCORE")
+
+	header := fmt.Sprintf("  %-*s  %s", idW, "ID", "Score")
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render(strings.Repeat("─", min(width, 70))))
+	b.WriteString(dimStyle.Render(strings.Repeat("─", min(width, idW+scoreW+10))))
 	b.WriteString("\n")
 
 	maxVisible := max(m.Height-12, 5)
@@ -105,19 +106,29 @@ func (m Model) buildDocumentsListPanel(width int) string {
 		id := truncate(doc.ID, idW)
 		score := fmt.Sprintf("%.3f", doc.Score)
 		if i == selectedIdx {
-			b.WriteString(selectedRowStyle.Render(fmt.Sprintf("▶ %-*s  %s", idW, id, score)))
+			b.WriteString(selectedStyle.Render("▶ "))
+			b.WriteString(selectedStyle.Render(fmt.Sprintf("%-*s", idW, id)))
+			b.WriteString("  ")
+			b.WriteString(normalStyle.Render(score))
 		} else {
-			b.WriteString(normalStyle.Render(fmt.Sprintf("  %-*s  %s", idW, id, score)))
+			b.WriteString("  ")
+			b.WriteString(normalStyle.Render(fmt.Sprintf("%-*s", idW, id)))
+			b.WriteString("  ")
+			b.WriteString(dimStyle.Render(score))
 		}
 		b.WriteString("\n")
 	}
 
-	b.WriteString(dimStyle.Render(fmt.Sprintf("\nshowing %d of %d", len(m.Documents), m.DocTotal)))
+	if len(m.Documents) > maxVisible || m.DocTotal > int64(len(m.Documents)) {
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render(fmt.Sprintf("%d-%d of %d", start+1, end, m.DocTotal)))
+	}
 	return b.String()
 }
 
 func (m Model) buildDocumentPreviewPanel(width int) string {
 	var b strings.Builder
+
 	b.WriteString(titleStyle.Render("Preview"))
 	b.WriteString("\n")
 	b.WriteString(dimStyle.Render(strings.Repeat("─", max(width, 8))))
@@ -133,14 +144,18 @@ func (m Model) buildDocumentPreviewPanel(width int) string {
 	b.WriteString(keyStyle.Render("ID: "))
 	b.WriteString(normalStyle.Render(truncate(doc.ID, max(width-6, 8))))
 	b.WriteString("\n\n")
+
 	b.WriteString(keyStyle.Render("Index: "))
 	b.WriteString(normalStyle.Render(doc.Index))
 	b.WriteString("\n\n")
+
 	b.WriteString(keyStyle.Render("Score: "))
 	b.WriteString(normalStyle.Render(fmt.Sprintf("%.4f", doc.Score)))
 	b.WriteString("\n\n")
+
 	b.WriteString(dimStyle.Render(strings.Repeat("─", max(width, 8))))
 	b.WriteString("\n\n")
+
 	b.WriteString(keyStyle.Render("Value"))
 	b.WriteString("\n\n")
 
@@ -177,7 +192,6 @@ func (m Model) viewDocumentDetail() string {
 	}
 	doc := *m.CurrentDocument
 	boxWidth := detailBoxWidth(m.Width)
-	contentWidth := max(boxWidth-6, 20)
 
 	var b strings.Builder
 	b.WriteString(lipgloss.PlaceHorizontal(boxWidth, lipgloss.Center, titleStyle.Render("Document Detail")))
@@ -222,7 +236,6 @@ func (m Model) viewDocumentDetail() string {
 	b.WriteString(lipgloss.PlaceHorizontal(min(m.Width, boxWidth+4), lipgloss.Center, box))
 	b.WriteString("\n\n")
 	b.WriteString(helpStyle.Render("e:edit  d:delete  j/k:scroll  esc:back"))
-	_ = contentWidth
 	return b.String()
 }
 
@@ -236,5 +249,3 @@ func detailBoxWidth(termWidth int) int {
 	}
 	return w
 }
-
-var _ = types.Document{}

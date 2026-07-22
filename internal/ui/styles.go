@@ -19,28 +19,34 @@ const (
 )
 
 var (
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorTeal)).MarginBottom(1)
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorWhite))
-	normalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colorWhite))
-	// selectedStyle: full-width band for detail lines (redis-style)
+	// Match redis-tui: accent blue titles / selection band (ANSI 39)
+	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).MarginBottom(1)
+	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
+	normalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	// selectedStyle: bold dark text on bright blue band (redis keys list)
 	selectedStyle = lipgloss.NewStyle().Bold(true).
-			Foreground(lipgloss.Color(colorNavy)).
-			Background(lipgloss.Color(colorTeal))
-	// selectedRowStyle: list rows — accent text + cursor, no full flood
-	selectedRowStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorTeal))
-	keyStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorBlue))
-	descStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color(colorWhite))
-	errorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed))
-	successStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(colorGreen))
-	dimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color(colorDim))
-	helpStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
-	metaDimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
-	accentStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color(colorTeal))
+			Foreground(lipgloss.Color("16")).
+			Background(lipgloss.Color("39"))
+	selectedRowStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+	keyStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	descStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	errorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	successStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	dimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	helpStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+	metaDimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	accentStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 	pinkStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color(colorPink))
 	yellowStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color(colorYellow))
 	tealStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color(colorTeal))
-	greenStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color(colorGreen))
-	blueStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color(colorBlue))
+	greenStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	blueStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+
+	// status column colors (like redis type colors)
+	statusOpenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	statusCloseStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	statusOtherStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+
 
 	logoPink   = lipgloss.NewStyle().Foreground(lipgloss.Color(colorPink)).Bold(true)
 	logoYellow = lipgloss.NewStyle().Foreground(lipgloss.Color(colorYellow)).Bold(true)
@@ -60,7 +66,7 @@ var (
 
 	connCardSelectedStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color(colorTeal)).
+				BorderForeground(lipgloss.Color("39")).
 				Padding(0, 1).
 				MarginBottom(0)
 
@@ -117,6 +123,25 @@ func healthStyle(status string) lipgloss.Style {
 	default:
 		return dimStyle
 	}
+}
+
+func healthStyleBold(status string) lipgloss.Style {
+	return healthStyle(status).Bold(true)
+}
+
+func indexStatusStyle(status string) lipgloss.Style {
+	switch status {
+	case "open":
+		return statusOpenStyle
+	case "close", "closed":
+		return statusCloseStyle
+	default:
+		return statusOtherStyle
+	}
+}
+
+func indexStatusStyleBold(status string) lipgloss.Style {
+	return indexStatusStyle(status).Bold(true)
 }
 
 func flavorBadge(flavor string) string {

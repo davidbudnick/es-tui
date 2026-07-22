@@ -79,7 +79,7 @@ func (m Model) renderConnectionCard(conn types.Connection, selected bool, width 
 	nameStyle := normalStyle
 	if selected {
 		icon = "●"
-		nameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colorTeal)).Bold(true)
+		nameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 	}
 
 	fmt.Fprintf(&card, " %s %s", icon, nameStyle.Render(conn.Name))
