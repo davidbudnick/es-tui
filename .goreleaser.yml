@@ -1,0 +1,100 @@
+version: 2
+
+project_name: es-tui
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: es-tui
+    main: .
+    binary: es-tui
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+
+homebrew_casks:
+  - name: es-tui
+    repository:
+      owner: davidbudnick
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/davidbudnick/es-tui
+    description: A powerful TUI for Elasticsearch and OpenSearch
+    license: MIT
+
+nfpms:
+  - id: packages
+    package_name: es-tui
+    vendor: David Budnick
+    homepage: https://github.com/davidbudnick/es-tui
+    maintainer: David Budnick
+    description: A powerful TUI for Elasticsearch and OpenSearch
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+
+release:
+  github:
+    owner: davidbudnick
+    name: es-tui
+  draft: false
+  prerelease: auto
+  mode: append
+  name_template: "es-tui v{{.Version}}"
+  header: |
+    ## What's New in es-tui v{{.Version}}
+  footer: |
+    ## Installation
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/davidbudnick/es-tui/main/install.sh | bash
+    ```

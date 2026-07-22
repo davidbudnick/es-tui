@@ -1,0 +1,12 @@
+.DS_Store
+.vscode
+.idea
+
+/dist
+/es-tui
+bin/
+coverage.out
+coverage.html
+.worktrees/
+*.test
+tmp/

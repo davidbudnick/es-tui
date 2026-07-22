@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Enforce 100% coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAILED=0
+
+          while IFS= read -r line; do
+              func=$(echo "$line" | awk '{print $2}')
+              pct=$(echo "$line" | awk '{print $NF}' | tr -d '%')
+
+              if [[ "$func" == "(statements)" ]]; then
+                  continue
+              fi
+
+              if (( $(echo "$pct < 100.0" | bc -l) )); then
+                  location=$(echo "$line" | awk '{print $1}')
+                  file=$(echo "$location" | cut -d':' -f1)
+                  line_num=$(echo "$location" | cut -d':' -f2)
+
+                  echo "::error file=$file,line=$line_num::Function $func coverage is ${pct}%, required 100%"
+                  FAILED=1
+              fi
+          done < <(go tool cover -func=coverage.out)
+
+          if [[ $FAILED -eq 1 ]]; then
+              echo "Coverage enforcement failed."
+              exit 1
+          fi
+
+          echo "All functions at 100% coverage"
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v7
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          binary_name="es-tui"
+          if [ "$GOOS" = "windows" ]; then
+            binary_name="${binary_name}.exe"
+          fi
+          go build -ldflags "-s -w" -o "bin/${binary_name}" ./
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: es-tui-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bin/
