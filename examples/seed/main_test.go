@@ -20,7 +20,7 @@ func TestRunSeedRich(t *testing.T) {
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(200)
 			_, _ = w.Write([]byte(`{"acknowledged":true}`))
-		case r.Method == http.MethodPut && path == "/_aliases":
+		case r.Method == http.MethodPost && path == "/_aliases":
 			aliases++
 			_, _ = w.Write([]byte(`{"acknowledged":true}`))
 		case r.Method == http.MethodPut && !strings.Contains(path, "/_doc"):
@@ -28,7 +28,6 @@ func TestRunSeedRich(t *testing.T) {
 			indices[name] = true
 			_, _ = w.Write([]byte(`{"acknowledged":true}`))
 		case r.Method == http.MethodPost && path == "/_bulk":
-			// count ndjson pairs
 			var body []byte
 			buf := make([]byte, 64*1024)
 			for {
