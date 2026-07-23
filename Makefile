@@ -118,7 +118,6 @@ docker-seed-os:
 demo: docker-up docker-seed
 	$(GO) build -o bin/$(APP_NAME) ./
 	env -u NO_COLOR COLORTERM=truecolor TERM=xterm-256color CLICOLOR_FORCE=1 vhs docs/demo.tape
-	env -u NO_COLOR COLORTERM=truecolor TERM=xterm-256color CLICOLOR_FORCE=1 vhs docs/metrics.tape
 	@python3 scripts/pick_demo_frames.py
 
 help:

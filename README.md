@@ -29,9 +29,25 @@ go install github.com/davidbudnick/es-tui@latest
 
 ## Screenshots
 
-### Connections (main page)
+### Index browser
 
-![Main](docs/main.png)
+![Indices](docs/indices.png)
+
+### Documents · logs (smart columns + JSON preview)
+
+![Documents](docs/documents.png)
+
+### Documents · products
+
+![Products](docs/products.png)
+
+### Document detail
+
+![Detail](docs/detail.png)
+
+### Nodes
+
+![Nodes](docs/nodes.png)
 
 ## Features
 

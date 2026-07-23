@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Extract README stills from VHS demo GIFs.
+"""Extract README stills from docs/main.gif (interesting screens, not connections).
 
-main.png  → connections (main) page near the start of main.gif
-metrics.png → densest late frame of metrics.gif
+Timeline is approximate for docs/demo.tape @ 24fps after Show.
 """
 
 from __future__ import annotations
@@ -15,6 +14,16 @@ try:
 except ImportError:
     print("pick_demo_frames: Pillow required (pip install pillow)", file=sys.stderr)
     sys.exit(1)
+
+# name -> (from_frac, to_frac) windows inside main.gif
+# Prefer dense browse/detail/search screens over the connections splash.
+STILLS = {
+    "indices.png": (0.12, 0.22),
+    "documents.png": (0.25, 0.36),
+    "detail.png": (0.36, 0.42),
+    "nodes.png": (0.50, 0.58),
+    "products.png": (0.72, 0.82),
+}
 
 
 def frame_score(im: Image.Image) -> float:
@@ -34,48 +43,17 @@ def frame_score(im: Image.Image) -> float:
     return nonbg * 1.2 + sat * 2.5
 
 
-def save_frame(im: Image.Image, idx: int, out_path: Path, label: str) -> None:
-    im.seek(idx)
-    frame = im.convert("RGB")
-    if frame.size[0] < 800 or frame.size[1] < 400:
-        raise SystemExit(f"pick_demo_frames: bad frame size {frame.size} for {out_path}")
-    frame.save(out_path, format="PNG")
-    n = getattr(im, "n_frames", 1)
-    print(f"  {out_path} ← {label} frame {idx}/{n} ({frame.size[0]}x{frame.size[1]})")
-
-
-def pick_connections(gif_path: Path, out_path: Path) -> None:
-    """Main page = first stable connections screen after the app is up."""
-    im = Image.open(gif_path)
-    n = getattr(im, "n_frames", 1)
-    # Connections hold is the first ~4–6s after Show (~100–150 frames @24fps).
-    # Skip the first few frames in case the terminal is still painting.
-    start = min(8, max(0, n // 50))
-    end = min(n - 1, max(start + 10, int(n * 0.12)))
-
-    best_idx = start
-    best_score = -1.0
-    for i in range(start, end + 1):
-        im.seek(i)
-        score = frame_score(im)
-        # Prefer colorful frames (ELASTIC logo pink/yellow/teal/blue).
-        if score > best_score:
-            best_score = score
-            best_idx = i
-    save_frame(im, best_idx, out_path, gif_path.name + " (connections/main)")
-
-
 def pick_best(gif_path: Path, out_path: Path, from_frac: float, to_frac: float) -> None:
     im = Image.open(gif_path)
     n = getattr(im, "n_frames", 1)
     start = int((n - 1) * from_frac)
     end = int((n - 1) * to_frac)
     if end <= start:
-        end = n - 1
+        end = min(n - 1, start + 10)
 
     step = 1
-    if end - start > 120:
-        step = max(1, (end - start) // 80)
+    if end - start > 80:
+        step = max(1, (end - start) // 50)
 
     best_idx = start
     best_score = -1.0
@@ -95,14 +73,23 @@ def pick_best(gif_path: Path, out_path: Path, from_frac: float, to_frac: float) 
             best_score = score
             best_idx = i
 
-    save_frame(im, best_idx, out_path, gif_path.name)
+    im.seek(best_idx)
+    frame = im.convert("RGB")
+    if frame.size[0] < 800 or frame.size[1] < 400:
+        raise SystemExit(f"pick_demo_frames: bad frame size {frame.size} for {out_path}")
+    frame.save(out_path, format="PNG")
+    print(f"  {out_path.name} ← frame {best_idx}/{n} ({frame.size[0]}x{frame.size[1]}, score {best_score:.0f})")
 
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    # README main still MUST be the connections / main page.
-    pick_connections(root / "docs/main.gif", root / "docs/main.png")
-    pick_best(root / "docs/metrics.gif", root / "docs/metrics.png", 0.45, 0.98)
+    gif = root / "docs/main.gif"
+    if not gif.exists():
+        print(f"pick_demo_frames: missing {gif}", file=sys.stderr)
+        return 1
+    out_dir = root / "docs"
+    for name, (a, b) in STILLS.items():
+        pick_best(gif, out_dir / name, a, b)
     return 0
 
 
