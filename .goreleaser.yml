@@ -60,7 +60,7 @@ changelog:
 homebrew_casks:
   - name: es-tui
     # Skip when HOMEBREW_TAP_GITHUB_TOKEN is unset (no cross-repo PAT).
-    skip_upload: '{{ eq (default "" .Env.HOMEBREW_TAP_GITHUB_TOKEN) "" }}'
+    skip_upload: '{{ not .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
     repository:
       owner: davidbudnick
       name: homebrew-tap
