@@ -33,10 +33,6 @@ go install github.com/davidbudnick/es-tui@latest
 
 ![Main](docs/main.png)
 
-### Live metrics dashboard
-
-![Metrics](docs/metrics.png)
-
 ## Features
 
 ### Browsing and Search
