@@ -310,8 +310,9 @@ func (m Model) viewConfirmDelete() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Confirm Delete"))
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("Delete %s:\n", m.ConfirmType))
-	b.WriteString(normalStyle.Render(fmt.Sprint(m.ConfirmData)))
+	b.WriteString(keyStyle.Render(confirmDeleteLabel(m.ConfirmType)))
+	b.WriteString("\n")
+	b.WriteString(normalStyle.Render(confirmDeleteTarget(m.ConfirmType, m.ConfirmData)))
 	b.WriteString("\n\n")
 	b.WriteString(errorStyle.Render("This cannot be undone."))
 	b.WriteString("\n\n")
@@ -321,6 +322,47 @@ func (m Model) viewConfirmDelete() string {
 		{"esc", "cancel"},
 	}))
 	return m.formModal(b.String())
+}
+
+func confirmDeleteLabel(kind string) string {
+	switch kind {
+	case "connection":
+		return "Delete connection"
+	case "index":
+		return "Delete index"
+	case "document":
+		return "Delete document"
+	default:
+		return "Delete " + kind
+	}
+}
+
+func confirmDeleteTarget(kind string, data any) string {
+	switch kind {
+	case "connection":
+		if conn, ok := data.(types.Connection); ok {
+			line := conn.Name
+			if addr := conn.Address(); addr != "" {
+				line += "\n" + addr
+			}
+			return line
+		}
+	case "index":
+		if name, ok := data.(string); ok {
+			return name
+		}
+	case "document":
+		if doc, ok := data.(types.Document); ok {
+			if doc.Index != "" {
+				return doc.Index + " / " + doc.ID
+			}
+			return doc.ID
+		}
+	}
+	if data == nil {
+		return "(unknown)"
+	}
+	return fmt.Sprint(data)
 }
 
 func (m Model) viewTestConnection() string {

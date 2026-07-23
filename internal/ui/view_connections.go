@@ -54,12 +54,13 @@ func (m Model) viewConnections() string {
 	b.WriteString("\n")
 
 	if len(m.Connections) == 0 {
-		b.WriteString("\n")
+		emptyMsg := "No connections saved.\n\nPress a to add your first connection."
 		emptyBox := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(colorDim)).
-			Padding(1, 2).
+			Align(lipgloss.Center).
 			Width(w).
-			Render("  No connections saved.\n\n  Press a to add your first Elasticsearch/OpenSearch connection.")
+			Padding(1, 0).
+			Render(emptyMsg)
 		b.WriteString(emptyBox)
 		b.WriteString("\n")
 	} else {
