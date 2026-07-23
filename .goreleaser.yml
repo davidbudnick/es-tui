@@ -59,12 +59,13 @@ changelog:
 
 homebrew_casks:
   - name: es-tui
-    # Skip when HOMEBREW_TAP_GITHUB_TOKEN is unset (no cross-repo PAT).
-    skip_upload: '{{ not .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    # Skip when HOMEBREW_TAP_GITHUB_TOKEN is unset/missing (no cross-repo PAT).
+    # index avoids "map has no entry" when the env var is absent entirely (CI snapshot).
+    skip_upload: '{{ eq (index .Env "HOMEBREW_TAP_GITHUB_TOKEN") "" }}'
     repository:
       owner: davidbudnick
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      token: '{{ index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}'
     directory: Casks
     homepage: https://github.com/davidbudnick/es-tui
     description: Lightweight Elasticsearch / OpenSearch TUI Manager
