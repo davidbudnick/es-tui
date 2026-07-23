@@ -191,7 +191,7 @@ func downloadFile(url, dest string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
-	f, err := os.Create(dest)
+	f, err := os.Create(dest) // #nosec G304 -- dest is a temp path we created
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func downloadFile(url, dest string) error {
 }
 
 func verifyChecksum(archivePath, checksumPath, archiveName string) error {
-	data, err := os.ReadFile(checksumPath)
+	data, err := os.ReadFile(checksumPath) // #nosec G304 -- checksumPath is a temp download we wrote
 	if err != nil {
 		return err
 	}
@@ -221,7 +221,7 @@ func verifyChecksum(archivePath, checksumPath, archiveName string) error {
 		return fmt.Errorf("checksum not found for %s", archiveName)
 	}
 
-	f, err := os.Open(archivePath)
+	f, err := os.Open(archivePath) // #nosec G304 -- archivePath is a verified temp download
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func verifyChecksum(archivePath, checksumPath, archiveName string) error {
 }
 
 func extractBinary(archivePath, destDir string) (string, error) {
-	f, err := os.Open(archivePath)
+	f, err := os.Open(archivePath) // #nosec G304 -- archivePath is a verified temp download
 	if err != nil {
 		return "", err
 	}
@@ -264,7 +264,8 @@ func extractBinary(archivePath, destDir string) (string, error) {
 			continue
 		}
 		outPath := filepath.Join(destDir, base)
-		out, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o750)
+		// Executable bit required for install; stays under temp destDir until swap.
+		out, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o750) // #nosec G302 G304
 		if err != nil {
 			return "", err
 		}
@@ -281,7 +282,7 @@ func extractBinary(archivePath, destDir string) (string, error) {
 }
 
 func installBinary(src, dest string) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) // #nosec G304 -- src is the extracted temp binary
 	if err != nil {
 		return err
 	}

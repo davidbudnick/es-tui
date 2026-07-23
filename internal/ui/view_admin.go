@@ -56,7 +56,9 @@ func (m Model) viewAllocation() string {
 func parsePct(s string) float64 {
 	s = strings.TrimSuffix(strings.TrimSpace(s), "%")
 	var f float64
-	fmt.Sscanf(s, "%f", &f)
+	if _, err := fmt.Sscanf(s, "%f", &f); err != nil {
+		return 0
+	}
 	return f
 }
 

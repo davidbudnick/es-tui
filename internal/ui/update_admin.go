@@ -374,7 +374,7 @@ func (m Model) exportDocsCmd(index, query, path string) tea.Cmd {
 		if err != nil {
 			return types.ExportCompleteMsg{Filename: path, Err: err}
 		}
-		f, err := os.Create(path)
+		f, err := os.Create(path) // #nosec G304 -- path is user-chosen export destination
 		if err != nil {
 			return types.ExportCompleteMsg{Filename: path, Err: err}
 		}
