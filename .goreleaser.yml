@@ -59,13 +59,15 @@ changelog:
 
 homebrew_casks:
   - name: es-tui
+    # Skip when HOMEBREW_TAP_GITHUB_TOKEN is unset (no cross-repo PAT).
+    skip_upload: '{{ eq (default "" .Env.HOMEBREW_TAP_GITHUB_TOKEN) "" }}'
     repository:
       owner: davidbudnick
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Casks
     homepage: https://github.com/davidbudnick/es-tui
-    description: A powerful TUI for Elasticsearch and OpenSearch
+    description: Lightweight Elasticsearch / OpenSearch TUI Manager
     license: MIT
 
 nfpms:
@@ -74,7 +76,7 @@ nfpms:
     vendor: David Budnick
     homepage: https://github.com/davidbudnick/es-tui
     maintainer: David Budnick
-    description: A powerful TUI for Elasticsearch and OpenSearch
+    description: Lightweight Elasticsearch / OpenSearch TUI Manager
     license: MIT
     formats:
       - deb

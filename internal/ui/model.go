@@ -3,9 +3,11 @@ package ui
 import (
 	"strings"
 
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	"github.com/davidbudnick/es-tui/internal/cmd"
 	"github.com/davidbudnick/es-tui/internal/types"
+	"github.com/davidbudnick/es-tui/internal/ui/editor"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -19,6 +21,9 @@ type Model struct {
 	SelectedConnIdx int
 	ConnInputs      []textinput.Model
 	ConnFocusIdx    int
+	ConnFlavorIdx   int  // index into connFlavorOptions
+	ConnFlavorOpen  bool // flavor dropdown expanded
+	ConnReadOnly    bool
 	EditingConn     *types.Connection
 	CurrentConn     *types.Connection
 	ClusterInfo     types.ClusterInfo
@@ -37,17 +42,34 @@ type Model struct {
 	DocQuery        string
 	DocFrom         int
 	DocTotal        int64
-	DetailScroll    int
+	DetailScroll    int // viewport top line in JSON/detail body
+	DetailCursor    int // selected line in document detail (blue band)
 	PageSize        int
+	// DocEditor is the redis-style multiline body editor (ScreenEditDocument).
+	DocEditor *editor.Model
+	// DocEditFocus is "id" or "body" while editing a document.
+	DocEditFocus string
+	// PrevScreen is restored when leaving Help.
+	PrevScreen types.Screen
 
-	SearchQuery    string
-	SearchResult   *types.SearchResult
-	SearchIndex    string
-	SearchFrom     int
-	SearchFocus    string // "query" | "results"
-	QueryHistory   []string
-	HistoryIdx     int
+	// Cached renders (redis-tui): pretty-print once on load, not every View().
+	DetailBody       string   // bounded pretty JSON for CurrentDocument
+	DetailTruncated  bool     // body cut at maxJSONPrettyBytes
+	DetailLinesCache []string // wrapped lines for DetailWrapWidth
+	DetailWrapWidth  int      // content width used for DetailLinesCache
+	PreviewDocID     string   // index/id of cached list preview
+	PreviewBody      string   // bounded pretty JSON for list preview
+	PreviewTruncated bool
 
+	SearchQuery  string
+	SearchResult *types.SearchResult
+	SearchIndex  string
+	SearchFrom   int
+	SearchFocus  string // "query" | "results"
+	// SearchArea is the multiline query editor on the search screen.
+	SearchArea   *textarea.Model
+	QueryHistory []string
+	HistoryIdx   int
 
 	ClusterHealth types.ClusterHealth
 	Nodes         []types.NodeInfo
@@ -111,27 +133,28 @@ type Model struct {
 
 // PaletteItem is one command-palette action.
 type PaletteItem struct {
-	ID   string
+	ID    string
 	Label string
-	Keys string
+	Keys  string
+	Group string
 }
 
 // ModelInputs holds text inputs behind a pointer to keep Model small.
 type ModelInputs struct {
-	PatternInput     textinput.Model
-	SearchInput      textinput.Model
-	IndexNameInput   textinput.Model
-	IndexBodyInput   textinput.Model
-	DocBodyInput     textinput.Model
-	DocIDInput       textinput.Model
-	BulkDeleteInput  textinput.Model
-	CatInput         textinput.Model
-	ReindexSrcInput  textinput.Model
-	ReindexDstInput  textinput.Model
-	ExportInput      textinput.Model
-	PaletteInput     textinput.Model
-	SavedQueryName   textinput.Model
-	SnapshotRepo     textinput.Model
+	PatternInput    textinput.Model
+	SearchInput     textinput.Model
+	IndexNameInput  textinput.Model
+	IndexBodyInput  textinput.Model
+	DocBodyInput    textinput.Model
+	DocIDInput      textinput.Model
+	BulkDeleteInput textinput.Model
+	CatInput        textinput.Model
+	ReindexSrcInput textinput.Model
+	ReindexDstInput textinput.Model
+	ExportInput     textinput.Model
+	PaletteInput    textinput.Model
+	SavedQueryName  textinput.Model
+	SnapshotRepo    textinput.Model
 }
 
 // NewModel creates a default model.
@@ -168,27 +191,27 @@ func NewModel() Model {
 
 func defaultPaletteItems() []PaletteItem {
 	return []PaletteItem{
-		{ID: "health", Label: "Cluster health", Keys: "c"},
-		{ID: "nodes", Label: "Nodes", Keys: "n"},
-		{ID: "metrics", Label: "Live metrics", Keys: "m"},
-		{ID: "shards", Label: "Shards", Keys: "s"},
-		{ID: "allocation", Label: "Disk allocation", Keys: ""},
-		{ID: "aliases", Label: "Aliases", Keys: "A"},
-		{ID: "templates", Label: "Index templates", Keys: "T"},
-		{ID: "datastreams", Label: "Data streams", Keys: ""},
-		{ID: "tasks", Label: "Tasks", Keys: ""},
-		{ID: "plugins", Label: "Plugins", Keys: ""},
-		{ID: "settings", Label: "Cluster settings", Keys: ""},
-		{ID: "snapshots", Label: "Snapshots", Keys: ""},
-		{ID: "search", Label: "Search", Keys: "/"},
-		{ID: "reindex", Label: "Reindex", Keys: ""},
-		{ID: "export", Label: "Export documents", Keys: ""},
-		{ID: "saved", Label: "Saved queries", Keys: ""},
-		{ID: "cat", Label: "Cat API", Keys: "C"},
-		{ID: "favorites", Label: "Favorites", Keys: "F"},
-		{ID: "recent", Label: "Recent indices", Keys: "R"},
-		{ID: "logs", Label: "App logs", Keys: "L"},
-		{ID: "help", Label: "Help", Keys: "?"},
+		{ID: "health", Label: "Cluster health", Keys: "c", Group: "Cluster"},
+		{ID: "nodes", Label: "Nodes", Keys: "n", Group: "Cluster"},
+		{ID: "metrics", Label: "Live metrics", Keys: "m", Group: "Cluster"},
+		{ID: "shards", Label: "Shards", Keys: "s", Group: "Cluster"},
+		{ID: "allocation", Label: "Disk allocation", Keys: "", Group: "Cluster"},
+		{ID: "settings", Label: "Cluster settings", Keys: "", Group: "Cluster"},
+		{ID: "tasks", Label: "Tasks", Keys: "", Group: "Cluster"},
+		{ID: "plugins", Label: "Plugins", Keys: "", Group: "Cluster"},
+		{ID: "aliases", Label: "Aliases", Keys: "A", Group: "Indices"},
+		{ID: "templates", Label: "Index templates", Keys: "T", Group: "Indices"},
+		{ID: "datastreams", Label: "Data streams", Keys: "", Group: "Indices"},
+		{ID: "snapshots", Label: "Snapshots", Keys: "", Group: "Indices"},
+		{ID: "favorites", Label: "Favorites", Keys: "F", Group: "Indices"},
+		{ID: "recent", Label: "Recent indices", Keys: "R", Group: "Indices"},
+		{ID: "search", Label: "Search", Keys: "/", Group: "Tools"},
+		{ID: "reindex", Label: "Reindex", Keys: "", Group: "Tools"},
+		{ID: "export", Label: "Export documents", Keys: "", Group: "Tools"},
+		{ID: "saved", Label: "Saved queries", Keys: "", Group: "Tools"},
+		{ID: "cat", Label: "Cat API", Keys: "C", Group: "Tools"},
+		{ID: "logs", Label: "App logs", Keys: "L", Group: "Tools"},
+		{ID: "help", Label: "Help", Keys: "?", Group: "Tools"},
 	}
 }
 
@@ -216,40 +239,76 @@ func createTextInput(placeholder string, width int) textinput.Model {
 	return ti
 }
 
+// Connection form field indices (text inputs 0–6, then selectors).
+const (
+	connFieldName = iota
+	connFieldHost
+	connFieldPort
+	connFieldUser
+	connFieldPass
+	connFieldAPIKey
+	connFieldBearer
+	connFieldFlavor
+	connFieldReadOnly
+	connFieldCount
+)
+
+const connTextCount = 7 // name…bearer
+
+var connFlavorOptions = []types.Flavor{
+	types.FlavorAuto,
+	types.FlavorElasticsearch,
+	types.FlavorOpenSearch,
+}
+
+var connTextLabels = []string{
+	"Name",
+	"Host",
+	"Port",
+	"Username",
+	"Password",
+	"API Key",
+	"Bearer Token",
+}
+
 func createConnectionInputs() []textinput.Model {
-	labels := []string{
-		"Name",
-		"Host",
-		"Port",
-		"Username",
-		"Password",
-		"API Key",
-		"Bearer Token",
-		"Flavor (auto|elasticsearch|opensearch)",
-		"Read-only (true|false)",
+	placeholders := []string{
+		"my-cluster",
+		"localhost",
+		"9200",
+		"optional",
+		"optional",
+		"optional",
+		"optional",
 	}
-	inputs := make([]textinput.Model, len(labels))
-	for i, label := range labels {
+	inputs := make([]textinput.Model, connTextCount)
+	for i, ph := range placeholders {
 		ti := textinput.New()
-		ti.Placeholder = label
+		ti.Placeholder = ph
 		ti.CharLimit = 2048
-		ti.SetWidth(40)
-		if i == 2 {
+		ti.SetWidth(42)
+		if i == connFieldPort {
 			ti.SetValue("9200")
 		}
-		if i == 7 {
-			ti.SetValue("auto")
+		if i == connFieldHost {
+			ti.SetValue("localhost")
 		}
-		if i == 8 {
-			ti.SetValue("false")
-		}
-		if i == 4 || i == 5 || i == 6 {
+		if i == connFieldPass || i == connFieldAPIKey || i == connFieldBearer {
 			ti.EchoMode = textinput.EchoPassword
 			ti.EchoCharacter = '•'
 		}
 		inputs[i] = ti
 	}
 	return inputs
+}
+
+func flavorIndex(f types.Flavor) int {
+	for i, opt := range connFlavorOptions {
+		if opt == f || (f == "" && opt == types.FlavorAuto) {
+			return i
+		}
+	}
+	return 0
 }
 
 // Init implements tea.Model.
@@ -264,5 +323,7 @@ func (m Model) Init() tea.Cmd {
 			return types.AutoConnectMsg{Connection: conn}
 		})
 	}
+	// Background release check (no-ops for dev builds).
+	cmds = append(cmds, cmd.CheckForUpdate(m.Version))
 	return tea.Batch(cmds...)
 }

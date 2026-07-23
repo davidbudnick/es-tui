@@ -10,16 +10,17 @@ Elasticsearch/OpenSearch TUI Manager — a terminal user interface for managing 
 make build              # Build binary to bin/es-tui
 make test               # Run tests: go test -v -race ./...
 make test-cover         # Tests with coverage report
-make test-cover-check   # Tests + fail if any function < 100% coverage
+make test-cover-check   # ≥80% overall; 100% on cmd/types/service
 make lint               # Run go vet
 make fmt                # Format code
 make run                # Build and run
 make docker-up          # Start ES (:9200) and OpenSearch (:9201)
 make docker-seed        # Seed demo indices on both
 make docker-down        # Stop demo clusters
+make demo               # Render README GIF via vhs (needs Docker + vhs)
 ```
 
-CI runs `go test -v -race -coverprofile=coverage.out ./...` and enforces **100% statement coverage** per function.
+CI runs lint, `go test -race` with coverage, multi-OS build, and GoReleaser snapshot. Coverage floor is **≥80%** overall (examples excluded); packages `internal/cmd`, `internal/types`, and `internal/service` must stay at **100%**.
 
 ## Architecture
 

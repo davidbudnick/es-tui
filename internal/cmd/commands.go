@@ -74,6 +74,12 @@ func (c *Commands) Connect(conn types.Connection) tea.Cmd {
 			return types.ConnectedMsg{Err: err}
 		}
 		info, err := c.es.GetClusterInfo()
+		if err == nil {
+			// Always surface the resolved engine (auto → ES/OS).
+			if f := c.es.Flavor(); f != "" {
+				info.Flavor = f
+			}
+		}
 		return types.ConnectedMsg{Info: info, Err: err}
 	}
 }

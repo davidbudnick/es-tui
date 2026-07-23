@@ -27,6 +27,24 @@ func TestConnectionAddressAndBaseURL(t *testing.T) {
 	}
 }
 
+func TestFlavorDisplay(t *testing.T) {
+	if FlavorElasticsearch.DisplayName() != "Elasticsearch" || FlavorOpenSearch.DisplayName() != "OpenSearch" {
+		t.Fatal("DisplayName")
+	}
+	if FlavorAuto.DisplayName() != "Auto" || Flavor("").DisplayName() != "Auto" {
+		t.Fatal("auto display")
+	}
+	if Flavor("custom").DisplayName() != "custom" {
+		t.Fatal("custom")
+	}
+	if FlavorElasticsearch.Short() != "ES" || FlavorOpenSearch.Short() != "OS" || FlavorAuto.Short() != "AUTO" {
+		t.Fatal("Short")
+	}
+	if !FlavorElasticsearch.IsKnown() || !FlavorOpenSearch.IsKnown() || FlavorAuto.IsKnown() || Flavor("").IsKnown() {
+		t.Fatal("IsKnown")
+	}
+}
+
 func TestTLSConfigBuildEmpty(t *testing.T) {
 	cfg := &TLSConfig{InsecureSkipVerify: true, ServerName: "example.com"}
 	tlsCfg, err := cfg.BuildTLSConfig()

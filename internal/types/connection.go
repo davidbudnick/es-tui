@@ -17,6 +17,40 @@ const (
 	FlavorAuto          Flavor = "auto"
 )
 
+// DisplayName returns a human-readable engine name.
+func (f Flavor) DisplayName() string {
+	switch f {
+	case FlavorOpenSearch:
+		return "OpenSearch"
+	case FlavorElasticsearch:
+		return "Elasticsearch"
+	case FlavorAuto:
+		return "Auto"
+	default:
+		if f == "" {
+			return "Auto"
+		}
+		return string(f)
+	}
+}
+
+// Short returns a compact badge label (ES / OS / AUTO).
+func (f Flavor) Short() string {
+	switch f {
+	case FlavorOpenSearch:
+		return "OS"
+	case FlavorElasticsearch:
+		return "ES"
+	default:
+		return "AUTO"
+	}
+}
+
+// IsKnown reports whether the flavor is a concrete engine (not auto/empty).
+func (f Flavor) IsKnown() bool {
+	return f == FlavorElasticsearch || f == FlavorOpenSearch
+}
+
 // Connection stores Elasticsearch/OpenSearch connection details.
 type Connection struct {
 	ID          int64      `json:"id"`

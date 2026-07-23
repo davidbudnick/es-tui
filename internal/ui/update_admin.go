@@ -227,12 +227,11 @@ func (m Model) runPaletteAction() (tea.Model, tea.Cmd) {
 		return m, nil
 	case "search":
 		m.Loading = false
-		m.Screen = types.ScreenSearch
-		m.SearchFocus = "query"
-		if m.Inputs != nil {
-			m.Inputs.SearchInput.Focus()
+		idx := ""
+		if m.CurrentIndex != nil {
+			idx = m.CurrentIndex.Name
 		}
-		return m, nil
+		return m.openSearchScreen(idx, "", true), nil
 	case "reindex":
 		m.Loading = false
 		m.Screen = types.ScreenReindex
@@ -448,9 +447,11 @@ func (m Model) handleSavedQueriesKeys(key string) (tea.Model, tea.Cmd) {
 		m.SearchQuery = q.Query
 		m.SearchFrom = 0
 		m.Screen = types.ScreenSearch
-		if m.Inputs != nil {
-			m.Inputs.SearchInput.SetValue(q.Query)
-		}
+		m.SearchArea = nil
+		m = m.ensureSearchArea()
+		m.SearchArea.SetValue(q.Query)
+		m.SearchFocus = "results"
+		m.SearchArea.Blur()
 		m.Loading = true
 		pageSize := m.PageSize
 		if pageSize <= 0 {
@@ -511,6 +512,8 @@ func (m Model) openPalette() (tea.Model, tea.Cmd) {
 	m.PaletteIdx = 0
 	if m.Inputs != nil {
 		m.Inputs.PaletteInput.SetValue("")
+		m.Inputs.PaletteInput.Placeholder = "Type to filter commands…"
+		m.Inputs.PaletteInput.SetWidth(44)
 		m.Inputs.PaletteInput.Focus()
 	}
 	return m, nil

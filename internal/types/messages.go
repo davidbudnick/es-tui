@@ -252,3 +252,11 @@ type SavedQueryDeletedMsg struct {
 	Name string
 	Err  error
 }
+
+// EditorSaveMsg is sent when the user saves in the document editor (Ctrl+S).
+type EditorSaveMsg struct {
+	Content string
+}
+
+// EditorQuitMsg is sent when the user cancels the document editor (Esc).
+type EditorQuitMsg struct{}

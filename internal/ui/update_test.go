@@ -624,15 +624,11 @@ func TestKeyHandlersFormsAndDocs(t *testing.T) {
 		t.Fatal("bad port")
 	}
 	m.ConnInputs[2].SetValue("9200")
-	m.ConnInputs[7].SetValue("nope")
-	if _, err := m.connectionFromInputs(); err == nil {
-		t.Fatal("bad flavor")
-	}
-	m.ConnInputs[7].SetValue("elasticsearch")
+	m.ConnFlavorIdx = 1 // elasticsearch
 	m.ConnInputs[0].SetValue("")
 	conn, err := m.connectionFromInputs()
-	if err != nil || conn.Name == "" {
-		t.Fatal(err)
+	if err != nil || conn.Name == "" || conn.Flavor != types.FlavorElasticsearch {
+		t.Fatal(err, conn)
 	}
 
 	// patternOrAll

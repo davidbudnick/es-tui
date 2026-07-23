@@ -56,8 +56,14 @@ func TestDetectFlavor(t *testing.T) {
 	if detectFlavor(types.ClusterInfo{Version: types.VersionInfo{Distribution: "opensearch"}}) != types.FlavorOpenSearch {
 		t.Fatal("os distribution")
 	}
+	if detectFlavor(types.ClusterInfo{Version: types.VersionInfo{Distribution: "OpenSearch"}}) != types.FlavorOpenSearch {
+		t.Fatal("os distribution case")
+	}
 	if detectFlavor(types.ClusterInfo{Version: types.VersionInfo{Number: "8.0.0"}}) != types.FlavorElasticsearch {
 		t.Fatal("es version")
+	}
+	if detectFlavor(types.ClusterInfo{Version: types.VersionInfo{BuildFlavor: "default", Number: "8.17.0"}}) != types.FlavorElasticsearch {
+		t.Fatal("es build_flavor")
 	}
 	if detectFlavor(types.ClusterInfo{}) != types.FlavorAuto {
 		t.Fatal("auto")

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/davidbudnick/es-tui/internal/types"
+	"github.com/davidbudnick/es-tui/internal/ui/editor"
 )
 
 // Update implements tea.Model.
@@ -21,6 +23,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
+		// Rewrap detail body on next paint (cheap; avoids stale wrap at new width).
+		m.invalidateDetailCache()
+		if m.Screen == types.ScreenEditDocument && m.DocEditor != nil {
+			m.DocEditor.SetSize(max(msg.Width-4, 20), max(msg.Height-12, 8))
+		}
+		if m.Screen == types.ScreenSearch && m.SearchArea != nil {
+			m.SearchArea.SetWidth(max(msg.Width/2-6, 40))
+			m.SearchArea.SetHeight(7)
+		}
+		return m, nil
+
+	case types.EditorSaveMsg:
+		if m.Screen != types.ScreenEditDocument || m.CurrentIndex == nil || m.Cmds == nil {
+			return m, nil
+		}
+		id := ""
+		if m.Inputs != nil {
+			id = strings.TrimSpace(m.Inputs.DocIDInput.Value())
+		}
+		m.Loading = true
+		return m, m.Cmds.SaveDocument(m.CurrentIndex.Name, id, msg.Content)
+
+	case types.EditorQuitMsg:
+		m.DocEditor = nil
+		m.DocEditFocus = ""
+		if m.CurrentDocument != nil {
+			m.Screen = types.ScreenDocumentDetail
+		} else {
+			m.Screen = types.ScreenDocuments
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -105,7 +137,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.ClusterInfo = msg.Info
 		m.Flavor = msg.Info.Flavor
-		if m.Flavor == "" && m.Cmds != nil {
+		if !m.Flavor.IsKnown() && m.Cmds != nil {
 			m.Flavor = m.Cmds.ES().Flavor()
 		}
 		if m.Cmds != nil {
@@ -113,11 +145,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.CurrentConn != nil {
 			m.ReadOnly = m.CurrentConn.ReadOnly
+			// Session knows the concrete engine after auto-detect.
+			if m.Flavor.IsKnown() {
+				m.CurrentConn.Flavor = m.Flavor
+			}
 		}
 		m.ConnectionError = ""
 		m.Err = nil
 		m.Screen = types.ScreenIndices
-		status := fmt.Sprintf("Connected to %s (%s)", msg.Info.ClusterName, msg.Info.Version.Number)
+		engine := m.Flavor.DisplayName()
+		status := fmt.Sprintf("Connected · %s · %s %s", engine, msg.Info.ClusterName, msg.Info.Version.Number)
 		if m.ReadOnly {
 			status += " [read-only]"
 		}
@@ -132,8 +169,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Indices = nil
 		m.Documents = nil
 		m.ReadOnly = false
+		m.LiveMetricsActive = false
+		m.LiveMetrics = nil
+		m.ClusterHealth = types.ClusterHealth{}
+		m.StatusMsg = ""
+		m.Err = nil
+		m.Loading = false
 		m.Screen = types.ScreenConnections
-		m.StatusMsg = "Disconnected"
 		return m, nil
 
 	case types.IndicesLoadedMsg:
@@ -203,6 +245,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Documents = msg.Documents
 		m.DocTotal = msg.Total
 		m.SelectedDocIdx = 0
+		// If we overshot (empty page past end), snap back to last valid page.
+		if len(msg.Documents) == 0 && m.DocTotal > 0 && m.DocFrom > 0 {
+			pageSize := m.docPageSize()
+			lastFrom := int((m.DocTotal - 1) / int64(pageSize) * int64(pageSize))
+			if lastFrom < 0 {
+				lastFrom = 0
+			}
+			if m.DocFrom > lastFrom {
+				m.DocFrom = lastFrom
+				m.Loading = true
+				if m.Cmds != nil && m.CurrentIndex != nil {
+					return m, m.Cmds.LoadDocuments(m.CurrentIndex.Name, m.DocQuery, m.DocFrom, pageSize)
+				}
+			}
+		}
+		m.refreshDocPreviewFromSelection()
 		m.Screen = types.ScreenDocuments
 		return m, nil
 
@@ -214,7 +272,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		doc := msg.Document
 		m.CurrentDocument = &doc
+		m.setDetailBody(doc)
 		m.DetailScroll = 0
+		m.DetailCursor = 0
 		m.Screen = types.ScreenDocumentDetail
 		return m, nil
 
@@ -224,6 +284,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Err = msg.Err
 			return m, nil
 		}
+		m.DocEditor = nil
+		m.DocEditFocus = ""
+		m.Screen = types.ScreenDocuments
 		m.StatusMsg = fmt.Sprintf("Saved %s/%s", msg.Index, msg.ID)
 		if m.Cmds != nil && m.CurrentIndex != nil {
 			return m, m.Cmds.LoadDocuments(m.CurrentIndex.Name, m.DocQuery, 0, 50)
@@ -285,8 +348,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Err = msg.Err
 			return m, nil
 		}
+		// Update status-bar chip only; do not steal the current screen
+		// (connect batches LoadClusterHealth in the background).
 		m.ClusterHealth = msg.Health
-		m.Screen = types.ScreenClusterHealth
 		return m, nil
 
 	case types.NodesLoadedMsg:
@@ -334,12 +398,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.TestConnResult = errorStyle.Render(fmt.Sprintf("Failed: %v (latency %s)", msg.Err, msg.Latency.Round(time.Millisecond)))
 		} else {
+			engine := msg.Info.Flavor.DisplayName()
 			m.TestConnResult = successStyle.Render(fmt.Sprintf(
-				"OK · %s %s · latency %s · %s",
+				"OK · %s · %s %s · latency %s",
+				engine,
 				msg.Info.ClusterName,
 				msg.Info.Version.Number,
 				msg.Latency.Round(time.Millisecond),
-				msg.Info.Flavor,
 			))
 		}
 		m.Screen = types.ScreenTestConnection
@@ -390,6 +455,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case types.LiveMetricsMsg:
+		if !m.LiveMetricsActive {
+			return m, nil
+		}
 		if msg.Err != nil {
 			m.Err = msg.Err
 			return m, nil
@@ -403,7 +471,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.LiveMetrics.History = m.LiveMetrics.History[len(m.LiveMetrics.History)-60:]
 		}
 		m.Screen = types.ScreenLiveMetrics
-		if m.LiveMetricsActive && m.Cmds != nil {
+		if m.Cmds != nil {
 			return m, m.Cmds.LiveMetricsTick()
 		}
 		return m, nil
@@ -467,8 +535,108 @@ func patternOrAll(m Model) string {
 	return "*"
 }
 
+func (m Model) docPageSize() int {
+	return clampPageSize(m.PageSize)
+}
+
+func (m Model) canDocPageNext() bool {
+	if m.DocTotal <= 0 {
+		return false
+	}
+	return int64(m.DocFrom+m.docPageSize()) < m.DocTotal
+}
+
+func (m Model) canSearchPageNext() bool {
+	if m.SearchResult == nil || m.SearchResult.Total <= 0 {
+		return false
+	}
+	pageSize := m.docPageSize()
+	return int64(m.SearchFrom+pageSize) < m.SearchResult.Total
+}
+
+func (m Model) searchQueryValue() string {
+	if m.SearchArea != nil {
+		return m.SearchArea.Value()
+	}
+	if m.Inputs != nil {
+		if q := m.Inputs.SearchInput.Value(); q != "" {
+			return q
+		}
+	}
+	return m.SearchQuery
+}
+
+func (m Model) focusSearchQuery() Model {
+	m = m.ensureSearchArea()
+	m.SearchFocus = "query"
+	m.SearchArea.Focus()
+	return m
+}
+
+func (m Model) leaveSearch() Model {
+	if m.SearchArea != nil {
+		m.SearchQuery = m.SearchArea.Value()
+	}
+	m.SearchArea = nil
+	m.SearchFocus = ""
+	if m.CurrentIndex != nil {
+		m.Screen = types.ScreenDocuments
+	} else {
+		m.Screen = types.ScreenIndices
+	}
+	return m
+}
+
+func (m Model) openSearchScreen(index, initialQuery string, clearResults bool) Model {
+	m.Screen = types.ScreenSearch
+	m.SearchIndex = index
+	m.SearchFrom = 0
+	m.SelectedDocIdx = 0
+	if clearResults {
+		m.SearchResult = nil
+	}
+	if initialQuery != "" {
+		m.SearchQuery = initialQuery
+	}
+	m.SearchArea = nil
+	return m.focusSearchQuery()
+}
+
+func (m Model) runSearchQuery() (tea.Model, tea.Cmd) {
+	pageSize := m.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	m = m.ensureSearchArea()
+	q := m.SearchArea.Value()
+	m.SearchQuery = q
+	m.pushQueryHistory(q)
+	m.SearchFrom = 0
+	m.SearchFocus = "results"
+	m.SearchArea.Blur()
+	m.SelectedDocIdx = 0
+	if m.Cmds == nil {
+		return m, nil
+	}
+	m.Loading = true
+	return m, m.Cmds.Search(m.SearchIndex, q, 0, pageSize)
+}
+
+func (m Model) applySearchTemplate(n int) Model {
+	templates := searchQueryTemplates()
+	if n < 0 || n >= len(templates) {
+		return m
+	}
+	m = m.ensureSearchArea()
+	m.SearchArea.SetValue(templates[n].Query)
+	m.SearchFocus = "query"
+	m.SearchArea.Focus()
+	m.HistoryIdx = -1
+	return m
+}
+
 func (m Model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
+	key := normalizeKey(msg)
 
 	// Global force quit
 	if key == "ctrl+c" {
@@ -478,6 +646,21 @@ func (m Model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Clear status on any key
 	m.StatusMsg = ""
 	m.Err = nil
+
+	// Global help — available from every browse screen (not while typing).
+	if key == "?" && !m.typingContext() {
+		if m.Screen == types.ScreenHelp {
+			return m.goBack()
+		}
+		m.PrevScreen = m.Screen
+		m.Screen = types.ScreenHelp
+		return m, nil
+	}
+
+	// Global command palette (colon) when not typing into a field.
+	if key == ":" && !m.typingContext() && m.Screen != types.ScreenCommandPalette {
+		return m.openPalette()
+	}
 
 	switch m.Screen {
 	case types.ScreenConnections:
@@ -564,8 +747,12 @@ func (m Model) handleConnectionsKeys(key string) (tea.Model, tea.Cmd) {
 		m.Screen = types.ScreenAddConnection
 		m.ConnInputs = createConnectionInputs()
 		m.ConnFocusIdx = 0
+		m.ConnFlavorIdx = 0
+		m.ConnFlavorOpen = false
+		m.ConnReadOnly = false
 		m.ConnInputs[0].Focus()
 		m.EditingConn = nil
+		m.Err = nil
 	case "e":
 		if len(m.Connections) == 0 {
 			return m, nil
@@ -574,25 +761,19 @@ func (m Model) handleConnectionsKeys(key string) (tea.Model, tea.Cmd) {
 		m.EditingConn = &conn
 		m.Screen = types.ScreenEditConnection
 		m.ConnInputs = createConnectionInputs()
-		m.ConnInputs[0].SetValue(conn.Name)
-		m.ConnInputs[1].SetValue(conn.Host)
-		m.ConnInputs[2].SetValue(strconv.Itoa(conn.Port))
-		m.ConnInputs[3].SetValue(conn.Username)
-		m.ConnInputs[4].SetValue(conn.Password)
-		m.ConnInputs[5].SetValue(conn.APIKey)
-		m.ConnInputs[6].SetValue(conn.BearerToken)
-		flavor := string(conn.Flavor)
-		if flavor == "" {
-			flavor = "auto"
-		}
-		m.ConnInputs[7].SetValue(flavor)
-		if conn.ReadOnly {
-			m.ConnInputs[8].SetValue("true")
-		} else {
-			m.ConnInputs[8].SetValue("false")
-		}
+		m.ConnInputs[connFieldName].SetValue(conn.Name)
+		m.ConnInputs[connFieldHost].SetValue(conn.Host)
+		m.ConnInputs[connFieldPort].SetValue(strconv.Itoa(conn.Port))
+		m.ConnInputs[connFieldUser].SetValue(conn.Username)
+		m.ConnInputs[connFieldPass].SetValue(conn.Password)
+		m.ConnInputs[connFieldAPIKey].SetValue(conn.APIKey)
+		m.ConnInputs[connFieldBearer].SetValue(conn.BearerToken)
+		m.ConnFlavorIdx = flavorIndex(conn.Flavor)
+		m.ConnFlavorOpen = false
+		m.ConnReadOnly = conn.ReadOnly
 		m.ConnFocusIdx = 0
 		m.ConnInputs[0].Focus()
+		m.Err = nil
 	case "d", "delete", "backspace":
 		if len(m.Connections) == 0 {
 			return m, nil
@@ -617,43 +798,60 @@ func (m Model) handleConnectionsKeys(key string) (tea.Model, tea.Cmd) {
 		m.Loading = true
 		m.ConnectionError = ""
 		return m, m.Cmds.Connect(conn)
-	case "?":
-		m.Screen = types.ScreenHelp
 	case "L":
 		m.Screen = types.ScreenLogs
-	case ":":
-		m.Screen = types.ScreenCommandPalette
-		m.PaletteItems = defaultPaletteItems()
-		m.PaletteIdx = 0
-		if m.Inputs != nil {
-			m.Inputs.PaletteInput.SetValue("")
-			m.Inputs.PaletteInput.Focus()
-		}
 	}
 	return m, nil
 }
 
 func (m Model) handleConnectionFormKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Flavor dropdown open: navigation stays inside the menu.
+	if m.ConnFocusIdx == connFieldFlavor && m.ConnFlavorOpen {
+		switch key {
+		case "esc":
+			m.ConnFlavorOpen = false
+			return m, nil
+		case "j", "down":
+			m.ConnFlavorIdx = (m.ConnFlavorIdx + 1) % len(connFlavorOptions)
+			return m, nil
+		case "k", "up":
+			m.ConnFlavorIdx = (m.ConnFlavorIdx - 1 + len(connFlavorOptions)) % len(connFlavorOptions)
+			return m, nil
+		case "enter", " ":
+			m.ConnFlavorOpen = false
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
 	switch key {
 	case "esc":
+		m.ConnFlavorOpen = false
+		m.Err = nil
 		m.Screen = types.ScreenConnections
 		return m, nil
 	case "tab", "down":
-		m.ConnInputs[m.ConnFocusIdx].Blur()
-		m.ConnFocusIdx = (m.ConnFocusIdx + 1) % len(m.ConnInputs)
-		m.ConnInputs[m.ConnFocusIdx].Focus()
-		return m, nil
+		return m.connFormMoveFocus(1), nil
 	case "shift+tab", "up":
-		m.ConnInputs[m.ConnFocusIdx].Blur()
-		m.ConnFocusIdx = (m.ConnFocusIdx - 1 + len(m.ConnInputs)) % len(m.ConnInputs)
-		m.ConnInputs[m.ConnFocusIdx].Focus()
-		return m, nil
+		return m.connFormMoveFocus(-1), nil
+	case " ", "space":
+		if m.ConnFocusIdx == connFieldFlavor {
+			m.ConnFlavorOpen = !m.ConnFlavorOpen
+			return m, nil
+		}
+		if m.ConnFocusIdx == connFieldReadOnly {
+			m.ConnReadOnly = !m.ConnReadOnly
+			return m, nil
+		}
 	case "enter":
+		// Enter always saves (space/←/→ handle engine + read-only).
 		conn, err := m.connectionFromInputs()
 		if err != nil {
 			m.Err = err
 			return m, nil
 		}
+		m.Err = nil
 		if m.Cmds == nil {
 			return m, nil
 		}
@@ -663,17 +861,46 @@ func (m Model) handleConnectionFormKeys(key string, msg tea.KeyPressMsg) (tea.Mo
 			return m, m.Cmds.UpdateConnection(conn)
 		}
 		return m, m.Cmds.AddConnection(conn)
+	case "left", "h":
+		if m.ConnFocusIdx == connFieldFlavor {
+			m.ConnFlavorIdx = (m.ConnFlavorIdx - 1 + len(connFlavorOptions)) % len(connFlavorOptions)
+			return m, nil
+		}
+	case "right", "l":
+		if m.ConnFocusIdx == connFieldFlavor {
+			m.ConnFlavorIdx = (m.ConnFlavorIdx + 1) % len(connFlavorOptions)
+			return m, nil
+		}
 	default:
-		var cmd tea.Cmd
-		m.ConnInputs[m.ConnFocusIdx], cmd = m.ConnInputs[m.ConnFocusIdx].Update(msg)
-		return m, cmd
+		if m.ConnFocusIdx >= 0 && m.ConnFocusIdx < connTextCount && m.ConnFocusIdx < len(m.ConnInputs) {
+			var cmd tea.Cmd
+			m.ConnInputs[m.ConnFocusIdx], cmd = m.ConnInputs[m.ConnFocusIdx].Update(msg)
+			return m, cmd
+		}
 	}
+	return m, nil
+}
+
+func (m Model) connFormMoveFocus(delta int) Model {
+	// Blur current text field if any.
+	if m.ConnFocusIdx >= 0 && m.ConnFocusIdx < connTextCount && m.ConnFocusIdx < len(m.ConnInputs) {
+		m.ConnInputs[m.ConnFocusIdx].Blur()
+	}
+	m.ConnFlavorOpen = false
+	m.ConnFocusIdx = (m.ConnFocusIdx + delta + connFieldCount) % connFieldCount
+	if m.ConnFocusIdx >= 0 && m.ConnFocusIdx < connTextCount && m.ConnFocusIdx < len(m.ConnInputs) {
+		m.ConnInputs[m.ConnFocusIdx].Focus()
+	}
+	return m
 }
 
 func (m Model) connectionFromInputs() (types.Connection, error) {
-	name := strings.TrimSpace(m.ConnInputs[0].Value())
-	host := strings.TrimSpace(m.ConnInputs[1].Value())
-	portStr := strings.TrimSpace(m.ConnInputs[2].Value())
+	if len(m.ConnInputs) < connTextCount {
+		return types.Connection{}, fmt.Errorf("form not initialized")
+	}
+	name := strings.TrimSpace(m.ConnInputs[connFieldName].Value())
+	host := strings.TrimSpace(m.ConnInputs[connFieldHost].Value())
+	portStr := strings.TrimSpace(m.ConnInputs[connFieldPort].Value())
 	if host == "" {
 		return types.Connection{}, fmt.Errorf("host is required")
 	}
@@ -688,26 +915,20 @@ func (m Model) connectionFromInputs() (types.Connection, error) {
 	if name == "" {
 		name = fmt.Sprintf("%s:%d", host, port)
 	}
-	flavor := types.Flavor(strings.ToLower(strings.TrimSpace(m.ConnInputs[7].Value())))
-	switch flavor {
-	case types.FlavorElasticsearch, types.FlavorOpenSearch, types.FlavorAuto, "":
-	default:
-		return types.Connection{}, fmt.Errorf("flavor must be auto, elasticsearch, or opensearch")
+	flavor := types.FlavorAuto
+	if m.ConnFlavorIdx >= 0 && m.ConnFlavorIdx < len(connFlavorOptions) {
+		flavor = connFlavorOptions[m.ConnFlavorIdx]
 	}
-	if flavor == "" {
-		flavor = types.FlavorAuto
-	}
-	ro := strings.EqualFold(strings.TrimSpace(m.ConnInputs[8].Value()), "true")
 	return types.Connection{
 		Name:        name,
 		Host:        host,
 		Port:        port,
-		Username:    strings.TrimSpace(m.ConnInputs[3].Value()),
-		Password:    m.ConnInputs[4].Value(),
-		APIKey:      strings.TrimSpace(m.ConnInputs[5].Value()),
-		BearerToken: strings.TrimSpace(m.ConnInputs[6].Value()),
+		Username:    strings.TrimSpace(m.ConnInputs[connFieldUser].Value()),
+		Password:    m.ConnInputs[connFieldPass].Value(),
+		APIKey:      strings.TrimSpace(m.ConnInputs[connFieldAPIKey].Value()),
+		BearerToken: strings.TrimSpace(m.ConnInputs[connFieldBearer].Value()),
 		Flavor:      flavor,
-		ReadOnly:    ro,
+		ReadOnly:    m.ConnReadOnly,
 	}, nil
 }
 
@@ -735,8 +956,12 @@ func (m Model) handleIndicesKeys(key string, msg tea.KeyPressMsg) (tea.Model, te
 	switch key {
 	case "esc", "q":
 		if m.Cmds != nil {
-			return m, tea.Batch(m.Cmds.Disconnect(), func() tea.Msg { return types.DisconnectedMsg{} })
+			// Disconnect() already returns DisconnectedMsg — don't double-fire.
+			return m, m.Cmds.Disconnect()
 		}
+		m.CurrentConn = nil
+		m.LiveMetricsActive = false
+		m.StatusMsg = ""
 		m.Screen = types.ScreenConnections
 		return m, nil
 	case "j", "down":
@@ -758,17 +983,11 @@ func (m Model) handleIndicesKeys(key string, msg tea.KeyPressMsg) (tea.Model, te
 			m.Inputs.PatternInput.Focus()
 			return m, nil
 		}
-		m.SearchIndex = ""
+		idx := ""
 		if len(m.Indices) > 0 {
-			m.SearchIndex = m.Indices[m.SelectedIndexIdx].Name
+			idx = m.Indices[m.SelectedIndexIdx].Name
 		}
-		m.Screen = types.ScreenSearch
-		m.SearchFocus = "query"
-		m.SearchFrom = 0
-		if m.Inputs != nil {
-			m.Inputs.SearchInput.SetValue("")
-			m.Inputs.SearchInput.Focus()
-		}
+		return m.openSearchScreen(idx, "", true), nil
 	case "r":
 		if m.Cmds != nil {
 			m.Loading = true
@@ -842,17 +1061,20 @@ func (m Model) handleIndicesKeys(key string, msg tea.KeyPressMsg) (tea.Model, te
 	case "c":
 		if m.Cmds != nil {
 			m.Loading = true
+			m.Screen = types.ScreenClusterHealth
 			return m, m.Cmds.LoadClusterHealth()
 		}
 	case "n":
 		if m.Cmds != nil {
 			m.Loading = true
+			m.Screen = types.ScreenNodes
 			return m, m.Cmds.LoadNodes()
 		}
 	case "m":
 		if m.Cmds != nil {
 			m.LiveMetricsActive = true
 			m.Loading = true
+			m.Screen = types.ScreenLiveMetrics
 			return m, m.Cmds.LoadLiveMetrics()
 		}
 	case "s":
@@ -897,12 +1119,8 @@ func (m Model) handleIndicesKeys(key string, msg tea.KeyPressMsg) (tea.Model, te
 		if m.CurrentConn != nil && m.Cmds != nil {
 			return m, m.Cmds.LoadRecentIndices(m.CurrentConn.ID)
 		}
-	case "?":
-		m.Screen = types.ScreenHelp
 	case "L":
 		m.Screen = types.ScreenLogs
-	case ":":
-		return m.openPalette()
 	case "P":
 		if m.Cmds != nil {
 			m.Loading = true
@@ -983,11 +1201,7 @@ func (m Model) handleIndexDetailKeys(key string) (tea.Model, tea.Cmd) {
 		}
 	case "/":
 		if m.CurrentIndex != nil {
-			m.SearchIndex = m.CurrentIndex.Name
-			m.Screen = types.ScreenSearch
-			if m.Inputs != nil {
-				m.Inputs.SearchInput.Focus()
-			}
+			return m.openSearchScreen(m.CurrentIndex.Name, "", true), nil
 		}
 	case "d":
 		if m.CurrentIndex != nil {
@@ -1026,10 +1240,12 @@ func (m Model) handleDocumentsKeys(key string, msg tea.KeyPressMsg) (tea.Model, 
 	case "j", "down":
 		if len(m.Documents) > 0 {
 			m.SelectedDocIdx = (m.SelectedDocIdx + 1) % len(m.Documents)
+			m.refreshDocPreviewFromSelection()
 		}
 	case "k", "up":
 		if len(m.Documents) > 0 {
 			m.SelectedDocIdx = (m.SelectedDocIdx - 1 + len(m.Documents)) % len(m.Documents)
+			m.refreshDocPreviewFromSelection()
 		}
 	case "enter":
 		if len(m.Documents) == 0 || m.Cmds == nil {
@@ -1048,27 +1264,20 @@ func (m Model) handleDocumentsKeys(key string, msg tea.KeyPressMsg) (tea.Model, 
 			m.Inputs.SearchInput.Focus()
 		}
 	case "/":
+		idx := ""
 		if m.CurrentIndex != nil {
-			m.SearchIndex = m.CurrentIndex.Name
+			idx = m.CurrentIndex.Name
 		}
-		m.Screen = types.ScreenSearch
-		m.SearchFocus = "query"
-		if m.Inputs != nil {
-			m.Inputs.SearchInput.SetValue(m.DocQuery)
-			m.Inputs.SearchInput.Focus()
-		}
+		return m.openSearchScreen(idx, m.DocQuery, true), nil
 	case "e":
-		m.Screen = types.ScreenEditDocument
-		if m.Inputs != nil {
-			m.Inputs.DocIDInput.SetValue("")
-			m.Inputs.DocBodyInput.SetValue(`{"message":"hello"}`)
-			if len(m.Documents) > 0 {
-				doc := m.Documents[m.SelectedDocIdx]
-				m.Inputs.DocIDInput.SetValue(doc.ID)
-				m.Inputs.DocBodyInput.SetValue(doc.Raw)
-			}
-			m.Inputs.DocBodyInput.Focus()
+		body := "{\n  \n}"
+		id := ""
+		if len(m.Documents) > 0 {
+			doc := m.Documents[m.SelectedDocIdx]
+			id = doc.ID
+			body = prettyJSONBody(doc)
 		}
+		return m.openDocEditor(id, body), nil
 	case "d":
 		if len(m.Documents) == 0 {
 			return m, nil
@@ -1095,21 +1304,25 @@ func (m Model) handleDocumentsKeys(key string, msg tea.KeyPressMsg) (tea.Model, 
 		if m.Cmds == nil || m.CurrentIndex == nil {
 			return m, nil
 		}
-		pageSize := m.PageSize
-		if pageSize <= 0 {
-			pageSize = 50
+		pageSize := m.docPageSize()
+		next := m.DocFrom + pageSize
+		if !m.canDocPageNext() {
+			m.StatusMsg = "Last page"
+			return m, nil
 		}
-		m.DocFrom += pageSize
+		m.DocFrom = next
 		m.Loading = true
 		return m, m.Cmds.LoadDocuments(m.CurrentIndex.Name, m.DocQuery, m.DocFrom, pageSize)
 	case "p":
 		if m.Cmds == nil || m.CurrentIndex == nil {
 			return m, nil
 		}
-		pageSize := m.PageSize
-		if pageSize <= 0 {
-			pageSize = 50
+		if m.DocFrom <= 0 {
+			m.DocFrom = 0
+			m.StatusMsg = "First page"
+			return m, nil
 		}
+		pageSize := m.docPageSize()
 		m.DocFrom -= pageSize
 		if m.DocFrom < 0 {
 			m.DocFrom = 0
@@ -1136,20 +1349,39 @@ func (m Model) handleDocumentDetailKeys(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc", "q":
 		m.Screen = types.ScreenDocuments
+		m.DetailScroll = 0
+		m.DetailCursor = 0
 	case "j", "down":
-		m.DetailScroll++
-	case "k", "up":
-		if m.DetailScroll > 0 {
-			m.DetailScroll--
+		if m.DetailCursor < m.documentDetailLastLine() {
+			m.DetailCursor++
+			m.syncDocumentDetailScroll()
 		}
+	case "k", "up":
+		if m.DetailCursor > 0 {
+			m.DetailCursor--
+			m.syncDocumentDetailScroll()
+		}
+	case "pgdown", "ctrl+d":
+		m.DetailCursor += 10
+		if last := m.documentDetailLastLine(); m.DetailCursor > last {
+			m.DetailCursor = last
+		}
+		m.syncDocumentDetailScroll()
+	case "pgup", "ctrl+u":
+		m.DetailCursor -= 10
+		if m.DetailCursor < 0 {
+			m.DetailCursor = 0
+		}
+		m.syncDocumentDetailScroll()
+	case "g", "home":
+		m.DetailCursor = 0
+		m.syncDocumentDetailScroll()
+	case "G", "end":
+		m.DetailCursor = m.documentDetailLastLine()
+		m.syncDocumentDetailScroll()
 	case "e":
 		if m.CurrentDocument != nil {
-			m.Screen = types.ScreenEditDocument
-			if m.Inputs != nil {
-				m.Inputs.DocIDInput.SetValue(m.CurrentDocument.ID)
-				m.Inputs.DocBodyInput.SetValue(m.CurrentDocument.Raw)
-				m.Inputs.DocBodyInput.Focus()
-			}
+			return m.openDocEditor(m.CurrentDocument.ID, prettyJSONBody(*m.CurrentDocument)), nil
 		}
 	case "d":
 		if m.CurrentDocument != nil {
@@ -1178,82 +1410,72 @@ func (m Model) handleSearchKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea
 		pageSize = 50
 	}
 
-	if m.Inputs != nil && m.Inputs.SearchInput.Focused() {
+	// Multiline query editor focused.
+	if m.SearchFocus == "query" {
+		m = m.ensureSearchArea()
 		switch key {
 		case "esc":
-			m.Inputs.SearchInput.Blur()
-			m.SearchFocus = "results"
-			return m, nil
-		case "enter":
-			m.Inputs.SearchInput.Blur()
-			m.SearchFocus = "results"
-			q := m.Inputs.SearchInput.Value()
-			m.SearchQuery = q
-			m.pushQueryHistory(q)
-			m.SearchFrom = 0
-			if m.Cmds != nil {
-				m.Loading = true
-				return m, m.Cmds.Search(m.SearchIndex, q, 0, pageSize)
+			// Keep draft text, but leave search entirely when there is nothing to browse.
+			// Avoid the awkward "stuck on Query: test" intermediate state.
+			m.SearchQuery = m.SearchArea.Value()
+			if m.SearchResult == nil || len(m.SearchResult.Hits) == 0 {
+				return m.leaveSearch(), nil
 			}
+			m.SearchArea.Blur()
+			m.SearchFocus = "results"
 			return m, nil
-		case "up":
-			// history
+		case "ctrl+enter", "ctrl+s", "ctrl+r":
+			return m.runSearchQuery()
+		case "ctrl+p": // previous history
 			if len(m.QueryHistory) == 0 {
 				return m, nil
 			}
 			if m.HistoryIdx < len(m.QueryHistory)-1 {
 				m.HistoryIdx++
-				m.Inputs.SearchInput.SetValue(m.QueryHistory[m.HistoryIdx])
+				m.SearchArea.SetValue(m.QueryHistory[m.HistoryIdx])
 			}
 			return m, nil
-		case "down":
+		case "ctrl+n": // next history
 			if m.HistoryIdx > 0 {
 				m.HistoryIdx--
-				m.Inputs.SearchInput.SetValue(m.QueryHistory[m.HistoryIdx])
+				m.SearchArea.SetValue(m.QueryHistory[m.HistoryIdx])
 			} else if m.HistoryIdx == 0 {
 				m.HistoryIdx = -1
-				m.Inputs.SearchInput.SetValue("")
+				m.SearchArea.SetValue("")
 			}
 			return m, nil
+		case "ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5":
+			n := int(key[len(key)-1] - '1')
+			return m.applySearchTemplate(n), nil
 		default:
-			var cmd tea.Cmd
-			m.Inputs.SearchInput, cmd = m.Inputs.SearchInput.Update(msg)
+			// Digits 1-5 with empty editor insert template quickly.
+			if len(key) == 1 && key[0] >= '1' && key[0] <= '5' && strings.TrimSpace(m.SearchArea.Value()) == "" {
+				return m.applySearchTemplate(int(key[0] - '1')), nil
+			}
+			area, cmd := m.SearchArea.Update(msg)
+			m.SearchArea = &area
 			return m, cmd
 		}
 	}
 
 	switch key {
 	case "esc", "q":
-		if m.CurrentIndex != nil {
-			m.Screen = types.ScreenDocuments
-		} else {
-			m.Screen = types.ScreenIndices
-		}
-	case "/", "enter":
-		if key == "enter" && m.SearchResult != nil && len(m.SearchResult.Hits) > 0 && m.SearchFocus == "results" {
-			// open selected hit
+		return m.leaveSearch(), nil
+	case "/":
+		return m.focusSearchQuery(), nil
+	case "enter":
+		if m.SearchResult != nil && len(m.SearchResult.Hits) > 0 {
 			if m.Cmds != nil {
 				doc := m.SearchResult.Hits[clamp(m.SelectedDocIdx, 0, len(m.SearchResult.Hits)-1)]
 				m.Loading = true
 				return m, m.Cmds.LoadDocument(doc.Index, doc.ID)
 			}
 		}
-		if m.Inputs != nil {
-			m.SearchFocus = "query"
-			m.Inputs.SearchInput.Focus()
-		}
+		return m.focusSearchQuery(), nil
 	case "tab":
-		if m.SearchFocus == "query" {
-			m.SearchFocus = "results"
-			if m.Inputs != nil {
-				m.Inputs.SearchInput.Blur()
-			}
-		} else {
-			m.SearchFocus = "query"
-			if m.Inputs != nil {
-				m.Inputs.SearchInput.Focus()
-			}
-		}
+		return m.focusSearchQuery(), nil
+	case "1", "2", "3", "4", "5":
+		return m.applySearchTemplate(int(key[0] - '1')), nil
 	case "j", "down":
 		hits := searchHits(m)
 		if len(hits) > 0 {
@@ -1295,15 +1517,20 @@ func (m Model) handleSearchKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea
 		if m.Cmds == nil {
 			return m, nil
 		}
+		if !m.canSearchPageNext() {
+			m.StatusMsg = "Last page"
+			return m, nil
+		}
 		m.SearchFrom += pageSize
 		m.Loading = true
-		q := m.SearchQuery
-		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
-			q = m.Inputs.SearchInput.Value()
-		}
-		return m, m.Cmds.Search(m.SearchIndex, q, m.SearchFrom, pageSize)
+		return m, m.Cmds.Search(m.SearchIndex, m.searchQueryValue(), m.SearchFrom, pageSize)
 	case "p":
 		if m.Cmds == nil {
+			return m, nil
+		}
+		if m.SearchFrom <= 0 {
+			m.SearchFrom = 0
+			m.StatusMsg = "First page"
 			return m, nil
 		}
 		m.SearchFrom -= pageSize
@@ -1311,30 +1538,18 @@ func (m Model) handleSearchKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea
 			m.SearchFrom = 0
 		}
 		m.Loading = true
-		q := m.SearchQuery
-		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
-			q = m.Inputs.SearchInput.Value()
-		}
-		return m, m.Cmds.Search(m.SearchIndex, q, m.SearchFrom, pageSize)
+		return m, m.Cmds.Search(m.SearchIndex, m.searchQueryValue(), m.SearchFrom, pageSize)
 	case "r":
 		if m.Cmds == nil {
 			return m, nil
 		}
 		m.Loading = true
-		q := m.SearchQuery
-		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
-			q = m.Inputs.SearchInput.Value()
-		}
-		return m, m.Cmds.Search(m.SearchIndex, q, m.SearchFrom, pageSize)
+		return m, m.Cmds.Search(m.SearchIndex, m.searchQueryValue(), m.SearchFrom, pageSize)
 	case "S":
-		// save current query
 		if m.Cmds == nil {
 			return m, nil
 		}
-		q := m.SearchQuery
-		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
-			q = m.Inputs.SearchInput.Value()
-		}
+		q := m.searchQueryValue()
 		if strings.TrimSpace(q) == "" {
 			m.Err = fmt.Errorf("nothing to save")
 			return m, nil
@@ -1349,25 +1564,16 @@ func (m Model) handleSearchKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea
 		if m.Cmds == nil {
 			return m, nil
 		}
-		q := m.SearchQuery
-		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
-			q = m.Inputs.SearchInput.Value()
-		}
 		m.Loading = true
-		return m, m.Cmds.Count(m.SearchIndex, q)
+		return m, m.Cmds.Count(m.SearchIndex, m.searchQueryValue())
 	case "x":
-		// explain selected hit
 		hits := searchHits(m)
 		if len(hits) == 0 || m.Cmds == nil {
 			return m, nil
 		}
 		doc := hits[clamp(m.SelectedDocIdx, 0, len(hits)-1)]
-		q := m.SearchQuery
-		if m.Inputs != nil && m.Inputs.SearchInput.Value() != "" {
-			q = m.Inputs.SearchInput.Value()
-		}
 		m.Loading = true
-		return m, m.Cmds.Explain(doc.Index, doc.ID, q)
+		return m, m.Cmds.Explain(doc.Index, doc.ID, m.searchQueryValue())
 	case ":":
 		return m.openPalette()
 	}
@@ -1432,16 +1638,20 @@ func (m Model) handleSimpleBackKeys(key string) (tea.Model, tea.Cmd) {
 	case "esc", "q":
 		return m.goBack()
 	case "j", "down":
-		m.DetailScroll++
 		if m.Screen == types.ScreenNodes && len(m.Nodes) > 0 {
 			m.SelectedNode = (m.SelectedNode + 1) % len(m.Nodes)
+		} else {
+			// Cap scroll so we don't walk past EOF (JSON panels / shards lists).
+			m.DetailScroll++
+			if m.DetailScroll > 100000 {
+				m.DetailScroll = 100000
+			}
 		}
 	case "k", "up":
-		if m.DetailScroll > 0 {
-			m.DetailScroll--
-		}
 		if m.Screen == types.ScreenNodes && len(m.Nodes) > 0 {
 			m.SelectedNode = (m.SelectedNode - 1 + len(m.Nodes)) % len(m.Nodes)
+		} else if m.DetailScroll > 0 {
+			m.DetailScroll--
 		}
 	case "r":
 		if m.Cmds == nil {
@@ -1506,46 +1716,107 @@ func (m Model) handleIndexCreateKeys(key string, msg tea.KeyPressMsg) (tea.Model
 	}
 }
 
+func (m Model) openDocEditor(id, body string) Model {
+	m.Screen = types.ScreenEditDocument
+	m.DocEditFocus = "body"
+	if m.Inputs != nil {
+		m.Inputs.DocIDInput.SetValue(id)
+		m.Inputs.DocIDInput.Blur()
+		m.Inputs.DocBodyInput.SetValue(body)
+		m.Inputs.DocBodyInput.Blur()
+	}
+	w := max(m.Width-4, 40)
+	h := max(m.Height-12, 10)
+	m.DocEditor = editor.New(body, w, h, "document.json")
+	return m
+}
+
+func prettyJSONBody(doc types.Document) string {
+	if s := strings.TrimSpace(doc.Raw); s != "" {
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, []byte(s), "", "  "); err == nil {
+			return buf.String()
+		}
+		return doc.Raw
+	}
+	if doc.Source != nil {
+		if b, err := json.MarshalIndent(doc.Source, "", "  "); err == nil {
+			return string(b)
+		}
+	}
+	return "{\n  \n}"
+}
+
 func (m Model) handleEditDocumentKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.Inputs == nil {
+	// Tab toggles ID field vs multiline body editor (redis-style body is the main surface).
+	if key == "tab" || key == "shift+tab" {
+		if m.DocEditFocus == "id" {
+			m.DocEditFocus = "body"
+			if m.Inputs != nil {
+				m.Inputs.DocIDInput.Blur()
+			}
+			return m, nil
+		}
+		m.DocEditFocus = "id"
+		if m.Inputs != nil {
+			m.Inputs.DocIDInput.Focus()
+		}
 		return m, nil
 	}
-	switch key {
-	case "esc":
+
+	// Save / quit handled here (same as redis-tui) so state updates immediately.
+	if key == "ctrl+s" {
+		body := ""
+		if m.DocEditor != nil {
+			body = m.DocEditor.Value()
+		} else if m.Inputs != nil {
+			body = m.Inputs.DocBodyInput.Value()
+		}
+		if m.CurrentIndex == nil || m.Cmds == nil {
+			return m, nil
+		}
+		id := ""
+		if m.Inputs != nil {
+			id = strings.TrimSpace(m.Inputs.DocIDInput.Value())
+		}
+		m.Loading = true
+		return m, m.Cmds.SaveDocument(m.CurrentIndex.Name, id, body)
+	}
+	if key == "esc" || key == "ctrl+q" {
+		m.DocEditor = nil
+		m.DocEditFocus = ""
 		if m.CurrentDocument != nil {
 			m.Screen = types.ScreenDocumentDetail
 		} else {
 			m.Screen = types.ScreenDocuments
 		}
 		return m, nil
-	case "tab":
-		if m.Inputs.DocIDInput.Focused() {
-			m.Inputs.DocIDInput.Blur()
-			m.Inputs.DocBodyInput.Focus()
-		} else {
-			m.Inputs.DocBodyInput.Blur()
-			m.Inputs.DocIDInput.Focus()
-		}
-		return m, nil
-	case "enter":
-		if m.CurrentIndex == nil || m.Cmds == nil {
+	}
+
+	if m.DocEditFocus == "id" {
+		if m.Inputs == nil {
 			return m, nil
 		}
-		m.Loading = true
-		return m, m.Cmds.SaveDocument(
-			m.CurrentIndex.Name,
-			strings.TrimSpace(m.Inputs.DocIDInput.Value()),
-			m.Inputs.DocBodyInput.Value(),
-		)
-	default:
 		var cmd tea.Cmd
-		if m.Inputs.DocIDInput.Focused() {
-			m.Inputs.DocIDInput, cmd = m.Inputs.DocIDInput.Update(msg)
-		} else {
-			m.Inputs.DocBodyInput, cmd = m.Inputs.DocBodyInput.Update(msg)
-		}
+		m.Inputs.DocIDInput, cmd = m.Inputs.DocIDInput.Update(msg)
 		return m, cmd
 	}
+
+	// Body editor (default) — multiline textarea like redis-tui.
+	if m.DocEditor == nil {
+		body := "{\n  \n}"
+		if m.Inputs != nil && m.Inputs.DocBodyInput.Value() != "" {
+			body = m.Inputs.DocBodyInput.Value()
+		}
+		m.DocEditor = editor.New(body, max(m.Width-4, 40), max(m.Height-12, 10), "document.json")
+	}
+	// Don't let editor swallow esc/ctrl+s again as async msgs — already handled above.
+	if key == "esc" || key == "ctrl+q" || key == "ctrl+s" {
+		return m, nil
+	}
+	updated, cmd := m.DocEditor.Update(msg)
+	m.DocEditor = updated
+	return m, cmd
 }
 
 func (m Model) handleBulkDeleteKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -1644,7 +1915,17 @@ func (m Model) handleCatAPIKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea
 
 func (m Model) goBack() (tea.Model, tea.Cmd) {
 	switch m.Screen {
-	case types.ScreenHelp, types.ScreenLogs, types.ScreenTestConnection,
+	case types.ScreenHelp:
+		if m.PrevScreen != types.ScreenHelp {
+			m.Screen = m.PrevScreen
+		} else if m.CurrentConn != nil {
+			m.Screen = types.ScreenIndices
+		} else {
+			m.Screen = types.ScreenConnections
+		}
+		// leave PrevScreen as-is; next help open overwrites it
+		return m, nil
+	case types.ScreenLogs, types.ScreenTestConnection,
 		types.ScreenClusterHealth, types.ScreenNodes, types.ScreenShards,
 		types.ScreenAliases, types.ScreenIndexTemplates, types.ScreenFavorites,
 		types.ScreenRecentIndices, types.ScreenCatAPI, types.ScreenLiveMetrics,

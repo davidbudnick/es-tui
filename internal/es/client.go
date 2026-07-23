@@ -76,6 +76,10 @@ func (c *Client) Connect(conn types.Connection) error {
 	if c.flavor == "" || c.flavor == types.FlavorAuto {
 		c.flavor = detectFlavor(info)
 	}
+	// Keep the live connection object in sync with what we actually talk to.
+	if c.conn != nil {
+		c.conn.Flavor = c.flavor
+	}
 	return nil
 }
 
@@ -162,14 +166,25 @@ func buildHTTPClient(conn types.Connection) (*http.Client, error) {
 }
 
 func detectFlavor(info types.ClusterInfo) types.Flavor {
-	tag := strings.ToLower(info.Tagline)
-	if info.Version.Distribution != "" || strings.Contains(tag, "opensearch") {
+	dist := strings.ToLower(strings.TrimSpace(info.Version.Distribution))
+	if dist == "opensearch" || strings.Contains(dist, "opensearch") {
 		return types.FlavorOpenSearch
 	}
-	if strings.Contains(tag, "elastic") || strings.Contains(tag, "you know, for search") {
+	tag := strings.ToLower(info.Tagline)
+	if strings.Contains(tag, "opensearch") {
+		return types.FlavorOpenSearch
+	}
+	// Elasticsearch root tagline is the classic "You Know, for Search".
+	if strings.Contains(tag, "you know, for search") || strings.Contains(tag, "elastic") {
+		return types.FlavorElasticsearch
+	}
+	// build_flavor is present on ES; OpenSearch uses distribution instead.
+	bf := strings.ToLower(info.Version.BuildFlavor)
+	if bf == "default" || bf == "oss" || bf == "serverless" {
 		return types.FlavorElasticsearch
 	}
 	if info.Version.Number != "" {
+		// Versioned root response without OpenSearch markers → ES family.
 		return types.FlavorElasticsearch
 	}
 	return types.FlavorAuto
@@ -283,6 +298,7 @@ func (c *Client) getClusterInfoLocked() (types.ClusterInfo, error) {
 			Distribution:                     str(v["distribution"]),
 		}
 	}
+	info.Flavor = detectFlavor(info)
 	return info, nil
 }
 
@@ -347,7 +363,6 @@ func (c *Client) GetClusterInfo() (types.ClusterInfo, error) {
 		ClusterName: str(raw["cluster_name"]),
 		ClusterUUID: str(raw["cluster_uuid"]),
 		Tagline:     str(raw["tagline"]),
-		Flavor:      c.Flavor(),
 	}
 	if v, ok := raw["version"].(map[string]any); ok {
 		info.Version = types.VersionInfo{
@@ -359,6 +374,13 @@ func (c *Client) GetClusterInfo() (types.ClusterInfo, error) {
 			LuceneVersion: str(v["lucene_version"]),
 			Distribution:  str(v["distribution"]),
 		}
+	}
+	// Prefer live client flavor (forced or previously detected); else detect from body.
+	detected := detectFlavor(info)
+	if f := c.Flavor(); f.IsKnown() {
+		info.Flavor = f
+	} else {
+		info.Flavor = detected
 	}
 	return info, nil
 }
@@ -570,8 +592,13 @@ func (c *Client) ForceMerge(name string, maxNumSegments int) error {
 
 // Search runs a search query. query may be a simple string (query_string) or full JSON body.
 func (c *Client) Search(index, query string, from, size int) (types.SearchResult, error) {
+	// Bound page size like redis-tui preview caps — never ask ES for huge pages.
+	const maxSearchSize = 200
 	if size <= 0 {
 		size = 50
+	}
+	if size > maxSearchSize {
+		size = maxSearchSize
 	}
 	if from < 0 {
 		from = 0
@@ -1154,15 +1181,36 @@ func (c *Client) ListSnapshots(repo string) ([]types.SnapshotInfo, error) {
 }
 
 // ExportDocs searches and returns documents up to maxDocs (capped at 5000).
+// Pages through Search (which bounds each page) so large exports stay memory-safe.
 func (c *Client) ExportDocs(index, query string, maxDocs int) ([]types.Document, error) {
 	if maxDocs <= 0 || maxDocs > 5000 {
 		maxDocs = 5000
 	}
-	result, err := c.Search(index, query, 0, maxDocs)
-	if err != nil {
-		return nil, err
+	const page = 200
+	var all []types.Document
+	from := 0
+	for len(all) < maxDocs {
+		n := page
+		if maxDocs-len(all) < n {
+			n = maxDocs - len(all)
+		}
+		result, err := c.Search(index, query, from, n)
+		if err != nil {
+			return nil, err
+		}
+		if len(result.Hits) == 0 {
+			break
+		}
+		all = append(all, result.Hits...)
+		from += len(result.Hits)
+		if len(result.Hits) < n {
+			break
+		}
+		if int64(from) >= result.Total && result.Total > 0 {
+			break
+		}
 	}
-	return result.Hits, nil
+	return all, nil
 }
 
 func firstNonEmpty(vals ...string) string {

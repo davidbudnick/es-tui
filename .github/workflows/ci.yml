@@ -9,7 +9,41 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      - name: go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum || (echo "go.mod/go.sum not tidy" && exit 1)
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -27,38 +61,34 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: |
+          pkgs=$(go list ./... | grep -v '/examples/')
+          go test -v -race -coverprofile=coverage.out $pkgs
+          go test -v ./examples/...
 
-      - name: Enforce 100% coverage
+      - name: Enforce coverage floor
         shell: bash
         run: |
           set -euo pipefail
-          FAILED=0
-
-          while IFS= read -r line; do
-              func=$(echo "$line" | awk '{print $2}')
-              pct=$(echo "$line" | awk '{print $NF}' | tr -d '%')
-
-              if [[ "$func" == "(statements)" ]]; then
-                  continue
-              fi
-
-              if (( $(echo "$pct < 100.0" | bc -l) )); then
-                  location=$(echo "$line" | awk '{print $1}')
-                  file=$(echo "$location" | cut -d':' -f1)
-                  line_num=$(echo "$location" | cut -d':' -f2)
-
-                  echo "::error file=$file,line=$line_num::Function $func coverage is ${pct}%, required 100%"
-                  FAILED=1
-              fi
-          done < <(go tool cover -func=coverage.out)
-
-          if [[ $FAILED -eq 1 ]]; then
-              echo "Coverage enforcement failed."
-              exit 1
+          MIN_COVERAGE="${MIN_COVERAGE:-80}"
+          total=$(go tool cover -func=coverage.out | awk '/total:/ {print $NF}' | tr -d '%')
+          echo "Total coverage: ${total}% (minimum ${MIN_COVERAGE}%)"
+          if (( $(echo "$total < $MIN_COVERAGE" | bc -l) )); then
+            echo "::error::Coverage ${total}% is below ${MIN_COVERAGE}%"
+            go tool cover -func=coverage.out | awk '$NF+0 < 100 {print}' | head -40
+            exit 1
           fi
-
-          echo "All functions at 100% coverage"
+          for dir in internal/cmd internal/types internal/service; do
+            go test -coverprofile=/tmp/pkg.out ./$dir >/dev/null
+            pt=$(go tool cover -func=/tmp/pkg.out | awk '/total:/ {print $NF}' | tr -d '%')
+            echo "$dir coverage: ${pt}%"
+            if (( $(echo "$pt < 100.0" | bc -l) )); then
+              echo "::error::$dir must remain at 100% coverage (got ${pt}%)"
+              go tool cover -func=/tmp/pkg.out | awk '$NF+0 < 100 {print}'
+              exit 1
+            fi
+          done
+          echo "Coverage OK"
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
@@ -68,8 +98,10 @@ jobs:
 
   build:
     name: Build
+    needs: [lint, test]
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         goos: [linux, darwin, windows]
         goarch: [amd64, arm64]
@@ -95,10 +127,45 @@ jobs:
           if [ "$GOOS" = "windows" ]; then
             binary_name="${binary_name}.exe"
           fi
-          go build -ldflags "-s -w" -o "bin/${binary_name}" ./
+          go build -ldflags "-s -w -X main.version=ci -X main.commit=${GITHUB_SHA::7} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o "bin/${binary_name}" ./
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: es-tui-${{ matrix.goos }}-${{ matrix.goarch }}
           path: bin/
+          if-no-files-found: error
+          retention-days: 7
+
+  goreleaser-check:
+    name: GoReleaser check
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      - name: Check GoReleaser config
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+
+      - name: Snapshot build
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

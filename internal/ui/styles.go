@@ -1,6 +1,10 @@
 package ui
 
-import "charm.land/lipgloss/v2"
+import (
+	"strings"
+
+	"charm.land/lipgloss/v2"
+)
 
 // Elastic logo multicolor palette:
 // pink #F04E98, yellow #FEC514, teal #00BFB3, green #00A69C, blue #3B8EEA, navy #343741
@@ -19,8 +23,9 @@ const (
 )
 
 var (
-	// Match redis-tui: accent blue titles / selection band (ANSI 39)
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).MarginBottom(1)
+	// Match redis-tui: accent blue titles / selection band (ANSI 39).
+	// No MarginBottom — browse panes stay dense; screens add their own spacing.
+	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
 	normalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 	// selectedStyle: bold dark text on bright blue band (redis keys list)
@@ -43,10 +48,9 @@ var (
 	blueStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 
 	// status column colors (like redis type colors)
-	statusOpenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	statusCloseStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	statusOtherStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-
+	statusOpenStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	statusCloseStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	statusOtherStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 
 	logoPink   = lipgloss.NewStyle().Foreground(lipgloss.Color(colorPink)).Bold(true)
 	logoYellow = lipgloss.NewStyle().Foreground(lipgloss.Color(colorYellow)).Bold(true)
@@ -145,10 +149,10 @@ func indexStatusStyleBold(status string) lipgloss.Style {
 }
 
 func flavorBadge(flavor string) string {
-	switch flavor {
-	case "opensearch":
+	switch strings.ToLower(strings.TrimSpace(flavor)) {
+	case "opensearch", "os":
 		return badgeOSStyle.Render("OS")
-	case "elasticsearch":
+	case "elasticsearch", "es":
 		return badgeESStyle.Render("ES")
 	default:
 		return badgeStyle.Render("AUTO")

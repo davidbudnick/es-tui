@@ -76,6 +76,9 @@ func run(addr string, flush bool) error {
 	if err := seedEvents(client, addr); err != nil {
 		return err
 	}
+	if err := seedExtraIndices(client, addr); err != nil {
+		return err
+	}
 
 	if err := post(client, addr+"/_aliases", map[string]any{
 		"actions": []map[string]any{
@@ -95,8 +98,64 @@ func run(addr string, flush bool) error {
 }
 
 func demoIndexNames() []string {
-	// includes legacy logs-demo so -flush cleans old seeds too
-	return []string{"products", "customers", "orders", "logs-app", "logs-demo", "metrics-host", "events"}
+	// Core + dense filler indices so the index browser fills a 1080p frame (redis-style).
+	names := []string{"products", "customers", "orders", "logs-app", "logs-demo", "metrics-host", "events"}
+	names = append(names, extraIndexNames()...)
+	return names
+}
+
+func extraIndexNames() []string {
+	apps := []string{
+		"auth-sessions", "billing-invoices", "billing-payments", "cart-items",
+		"catalog-sku", "checkout-sessions", "cms-pages", "cms-posts",
+		"feature-flags", "geo-ip", "inventory-stock", "jobs-queue",
+		"ml-embeddings", "ml-predictions", "notifications", "pricing-rules",
+		"recommendations", "search-suggest", "security-audit", "sessions-web",
+		"shipping-labels", "support-tickets", "telemetry-clicks", "telemetry-pageviews",
+		"user-profiles", "user-prefs", "webhooks", "workflows",
+	}
+	// Daily indices fill the list like a real cluster (avoid "logs*" — ES 8 has a logs DS template).
+	now := time.Now().UTC()
+	for i := 0; i < 14; i++ {
+		day := now.AddDate(0, 0, -i)
+		apps = append(apps, fmt.Sprintf("app-events-%s", day.Format("2006.01.02")))
+	}
+	return apps
+}
+
+func seedExtraIndices(client *http.Client, addr string) error {
+	now := time.Now().UTC()
+	names := extraIndexNames()
+	for i, name := range names {
+		if err := put(client, addr+"/"+name, map[string]any{
+			"settings": map[string]any{"number_of_shards": 1, "number_of_replicas": 0},
+			"mappings": map[string]any{
+				"properties": map[string]any{
+					"@timestamp": map[string]any{"type": "date"},
+					"kind":       map[string]any{"type": "keyword"},
+					"message":    map[string]any{"type": "text"},
+					"value":      map[string]any{"type": "integer"},
+				},
+			},
+		}); err != nil {
+			return fmt.Errorf("create %s: %w", name, err)
+		}
+		n := 3 + (i % 8)
+		docs := make([]map[string]any, 0, n)
+		for j := 0; j < n; j++ {
+			docs = append(docs, map[string]any{
+				"@timestamp": now.Add(-time.Duration(j) * time.Hour).Format(time.RFC3339),
+				"kind":       "demo",
+				"message":    fmt.Sprintf("%s sample %d", name, j+1),
+				"value":      (i+1)*(j+1) + 7,
+			})
+		}
+		if err := bulkIndex(client, addr, name, docs); err != nil {
+			return fmt.Errorf("bulk %s: %w", name, err)
+		}
+	}
+	fmt.Fprintf(seedStdout, "  extra indices: %d (dense demo list)\n", len(names))
+	return nil
 }
 
 func seedProducts(client *http.Client, addr string) error {
@@ -202,9 +261,9 @@ func seedOrders(client *http.Client, addr string) error {
 				"items": map[string]any{
 					"type": "nested",
 					"properties": map[string]any{
-						"sku":      map[string]any{"type": "keyword"},
-						"name":     map[string]any{"type": "text"},
-						"qty":      map[string]any{"type": "integer"},
+						"sku":        map[string]any{"type": "keyword"},
+						"name":       map[string]any{"type": "text"},
+						"qty":        map[string]any{"type": "integer"},
 						"unit_price": map[string]any{"type": "float"},
 					},
 				},
@@ -338,7 +397,8 @@ func seedLogs(client *http.Client, addr string) error {
 	methods := []string{"GET", "GET", "POST", "GET", "PUT", "POST"}
 
 	var docs []map[string]any
-	for i := 0; i < 80; i++ {
+	// ~120 docs so the documents browser fills a 1080p frame.
+	for i := 0; i < 120; i++ {
 		level := levels[i%len(levels)]
 		svc := services[i%len(services)]
 		status := 200
@@ -442,7 +502,7 @@ func seedEvents(client *http.Client, addr string) error {
 		{"event_id": "evt-5", "type": "user.logout", "actor": "alice@example.com", "target": "auth", "payload": map[string]any{"session_min": 42}, "timestamp": now.Add(-90 * time.Minute).Format(time.RFC3339)},
 		{"event_id": "evt-6", "type": "alert.fired", "actor": "monitor", "target": "cluster", "payload": map[string]any{"rule": "heap_high", "value": 82.5}, "timestamp": now.Add(-45 * time.Minute).Format(time.RFC3339)},
 		{"event_id": "evt-7", "type": "order.shipped", "actor": "system", "target": "ORD-1001", "payload": map[string]any{"carrier": "demo-ship"}, "timestamp": now.Add(-24 * time.Hour).Format(time.RFC3339)},
-		{"event_id": "evt-8", "type": "doc.index", "actor": "indexer", "target": "logs-app", "payload": map[string]any{"count": 80}, "timestamp": now.Add(-10 * time.Minute).Format(time.RFC3339)},
+		{"event_id": "evt-8", "type": "doc.index", "actor": "indexer", "target": "logs-app", "payload": map[string]any{"count": 120}, "timestamp": now.Add(-10 * time.Minute).Format(time.RFC3339)},
 		{"event_id": "evt-9", "type": "user.login", "actor": "grace@example.com", "target": "auth", "payload": map[string]any{"ip": "198.51.100.22", "method": "sso"}, "timestamp": now.Add(-8 * time.Minute).Format(time.RFC3339)},
 		{"event_id": "evt-10", "type": "search.query", "actor": "search-service", "target": "orders", "payload": map[string]any{"q": "status:pending", "took_ms": 8}, "timestamp": now.Add(-3 * time.Minute).Format(time.RFC3339)},
 	}
