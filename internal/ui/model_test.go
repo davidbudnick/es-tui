@@ -2,6 +2,7 @@ package ui
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -216,6 +217,112 @@ func TestViewsRender(t *testing.T) {
 	m.Err = nil
 	m.UpdateAvailable = "v2"
 	_ = m.getStatusBar()
+}
+
+func TestGetStatusBarPriority(t *testing.T) {
+	m := NewModel()
+	m.Width = 100
+	m.Height = 40
+	m.Screen = types.ScreenIndices
+	m.CurrentConn = &types.Connection{Name: "local", Flavor: types.FlavorElasticsearch}
+	m.Flavor = types.FlavorElasticsearch
+	m.ClusterHealth = types.ClusterHealth{Status: "green"}
+
+	m.Err = errString("boom")
+	m.StatusMsg = "ok"
+	m.Loading = true
+	bar := m.getStatusBar()
+	if !strings.Contains(bar, "boom") {
+		t.Fatalf("err should win over status+loading, got %q", bar)
+	}
+	if strings.Contains(bar, "ok") || strings.Contains(bar, "Loading") {
+		t.Fatalf("err bar should not include status/loading, got %q", bar)
+	}
+
+	m.Err = nil
+	bar = m.getStatusBar()
+	if !strings.Contains(bar, "ok") {
+		t.Fatalf("status should show when no err, got %q", bar)
+	}
+	if strings.Contains(bar, "Loading") {
+		t.Fatalf("status should outrank loading, got %q", bar)
+	}
+
+	m.StatusMsg = ""
+	bar = m.getStatusBar()
+	if !strings.Contains(bar, "Loading") {
+		t.Fatalf("loading expected, got %q", bar)
+	}
+	if !strings.Contains(bar, "Connected") || !strings.Contains(bar, "local") {
+		t.Fatalf("loading should keep connection chips, got %q", bar)
+	}
+
+	m.Loading = false
+	m.UpdateAvailable = "v9"
+	bar = m.getStatusBar()
+	if !strings.Contains(bar, "update v9") {
+		t.Fatalf("update hint expected, got %q", bar)
+	}
+
+	m.UpdateAvailable = ""
+	bar = m.getStatusBar()
+	if !strings.Contains(bar, "Connected") || !strings.Contains(bar, "local") {
+		t.Fatalf("connected chips expected, got %q", bar)
+	}
+}
+
+func TestViewHelpIndicesHotkeys(t *testing.T) {
+	m := NewModel()
+	m.Width = 100
+	m.Height = 40
+	help := m.viewHelp()
+	for _, want := range []string{"Data streams", "Cluster settings", "Snapshots", "Saved queries", "Export"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help missing %q", want)
+		}
+	}
+	for _, key := range []string{"E", "U", "Z", "Y", "Q"} {
+		if !strings.Contains(help, key) {
+			t.Fatalf("help missing key %q", key)
+		}
+	}
+}
+
+func TestDefaultPaletteItemKeys(t *testing.T) {
+	want := map[string]string{
+		"allocation":  "V",
+		"settings":    "U",
+		"tasks":       "W",
+		"plugins":     "P",
+		"datastreams": "E",
+		"snapshots":   "Z",
+		"reindex":     "I",
+		"export":      "Q",
+		"saved":       "Y",
+	}
+	for _, item := range defaultPaletteItems() {
+		if k, ok := want[item.ID]; ok && item.Keys != k {
+			t.Fatalf("palette %s Keys=%q want %q", item.ID, item.Keys, k)
+		}
+	}
+}
+
+func TestKeypressClearsStatusNotErr(t *testing.T) {
+	m := NewModel()
+	m.Width = 100
+	m.Height = 40
+	m.Screen = types.ScreenIndices
+	m.StatusMsg = "done"
+	m.Err = errString("still here")
+
+	nm, _ := m.handleKeyPress(makeKey("j"))
+	m = nm.(Model)
+	if m.StatusMsg != "" {
+		t.Fatalf("StatusMsg should clear on keypress, got %q", m.StatusMsg)
+	}
+	if m.Err == nil || m.Err.Error() != "still here" {
+		t.Fatalf("Err should persist across keypress, got %v", m.Err)
+	}
 }
 
 type errString string
