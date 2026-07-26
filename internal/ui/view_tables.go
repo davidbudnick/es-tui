@@ -641,16 +641,8 @@ func (m Model) viewJSONPanel(title, body string) string {
 	if body == "" {
 		b.WriteString(dimStyle.Render("(empty)"))
 	} else {
-		// Bound + plain first so huge mappings don't freeze paint.
-		plain, trunc := boundJSONBody(body)
-		if plain == "" {
-			plain = body
-		}
-		if lines, dropped := truncateLines(plain, maxJSONPanelLines); dropped > 0 {
-			plain = lines
-			trunc = true
-		}
-		all := wrapPlainLines(strings.Split(plain, "\n"), max(m.Width-8, 40))
+		wrapW := jsonPanelWrapWidth(m.Width)
+		all, trunc := m.jsonPanelLines(body, wrapW)
 		maxLines := max(m.Height-10, 8)
 		visible, topHint, bottomHint, _ := scrollValueLines(all, m.DetailScroll, maxLines)
 		if topHint != "" {

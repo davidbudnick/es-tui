@@ -25,6 +25,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Height = msg.Height
 		// Rewrap detail body on next paint (cheap; avoids stale wrap at new width).
 		m.invalidateDetailCache()
+		m.invalidateJSONPanelCache()
+		if m.JSONPanelPlain != "" {
+			m.syncJSONPanelWrap(jsonPanelWrapWidth(m.Width))
+		}
+		if len(m.Documents) > 0 {
+			m.refreshDocListColumns(m.docListPanelWidth())
+		} else {
+			m.invalidateDocListColumns()
+		}
 		if m.Screen == types.ScreenEditDocument && m.DocEditor != nil {
 			m.DocEditor.SetSize(max(msg.Width-4, 20), max(msg.Height-12, 8))
 		}
@@ -168,6 +177,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.CurrentConn = nil
 		m.Indices = nil
 		m.Documents = nil
+		m.invalidateDocListColumns()
 		m.ReadOnly = false
 		m.LiveMetricsActive = false
 		m.LiveMetrics = nil
@@ -261,6 +271,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.refreshDocPreviewFromSelection()
+		m.refreshDocListColumns(m.docListPanelWidth())
 		m.Screen = types.ScreenDocuments
 		return m, nil
 
@@ -316,6 +327,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Documents = r.Hits
 		m.DocTotal = r.Total
 		m.SelectedDocIdx = 0
+		m.refreshDocListColumns(m.docListPanelWidth())
 		m.SearchFocus = "results"
 		if m.Screen != types.ScreenSearch && m.Screen != types.ScreenDocuments {
 			m.Screen = types.ScreenSearch
@@ -489,6 +501,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.IndexSettings = msg.Settings
+		m.setJSONPanel(msg.Settings)
 		m.DetailScroll = 0
 		m.Screen = types.ScreenIndexSettings
 		return m, nil
@@ -500,6 +513,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.IndexMappings = msg.Mappings
+		m.setJSONPanel(msg.Mappings)
 		m.DetailScroll = 0
 		m.Screen = types.ScreenIndexMappings
 		return m, nil
