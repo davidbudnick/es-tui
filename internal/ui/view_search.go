@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -340,20 +339,25 @@ func (m Model) buildSearchPreviewPanel(width int) string {
 	b.WriteString(keyStyle.Render("Source"))
 	b.WriteString("\n")
 
-	raw := doc.Raw
-	if raw == "" && doc.Source != nil {
-		if bb, err := json.MarshalIndent(doc.Source, "", "  "); err == nil {
-			raw = string(bb)
-		}
+	wantID := doc.Index + "/" + doc.ID
+	plain := m.SearchPreviewBody
+	trunc := m.SearchPreviewTrunc
+	if m.SearchPreviewHitID != wantID || plain == "" {
+		plain, trunc = documentSourceJSON(doc)
 	}
-	if raw == "" {
+	if plain == "" {
 		b.WriteString(dimStyle.Render("(empty)"))
 		return b.String()
 	}
 
 	maxLines := max(m.Height-18, 8)
-	colored := colorizeJSON(raw)
-	lines := strings.Split(colored, "\n")
+	wrapW := max(width-2, 20)
+	var lines []string
+	if m.SearchPreviewHitID == wantID && m.SearchPreviewWrapWidth == wrapW && m.SearchPreviewLinesCache != nil {
+		lines = m.SearchPreviewLinesCache
+	} else {
+		lines = colorizeJSONLines(wrapPlainLines(strings.Split(plain, "\n"), wrapW))
+	}
 	for i, line := range lines {
 		if i >= maxLines {
 			b.WriteString(dimStyle.Render(fmt.Sprintf("… %d more lines", len(lines)-i)))
@@ -361,6 +365,9 @@ func (m Model) buildSearchPreviewPanel(width int) string {
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
+	}
+	if trunc {
+		b.WriteString(dimStyle.Render("(preview truncated at 64KB)"))
 	}
 	return b.String()
 }
