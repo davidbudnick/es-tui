@@ -136,14 +136,17 @@ func (m Model) getStatusBar() string {
 		return ""
 	}
 
-	if m.Loading {
-		return dimStyle.Render("Loading...")
+	if m.Err != nil {
+		return errorStyle.Render(m.Err.Error())
 	}
 	if m.StatusMsg != "" {
 		return successStyle.Render(m.StatusMsg)
 	}
-	if m.Err != nil {
-		return errorStyle.Render(m.Err.Error())
+	if m.Loading {
+		if chips := m.connectionChips(); chips != "" {
+			return dimStyle.Render("Loading...") + "  ·  " + chips
+		}
+		return dimStyle.Render("Loading...")
 	}
 	if m.UpdateAvailable != "" {
 		hint := "es-tui --update"
@@ -153,11 +156,16 @@ func (m Model) getStatusBar() string {
 		return yellowStyle.Render("update " + m.UpdateAvailable + " · " + hint)
 	}
 
-	// Connected browse screens only.
+	if chips := m.connectionChips(); chips != "" {
+		return chips + "  ·  " + dimStyle.Render("? help · q quit")
+	}
+	return ""
+}
+
+func (m Model) connectionChips() string {
 	if m.CurrentConn == nil {
 		return ""
 	}
-
 	var parts []string
 	parts = append(parts, successStyle.Render("Connected"))
 	if m.CurrentConn.Name != "" {
@@ -174,7 +182,6 @@ func (m Model) getStatusBar() string {
 	if m.ClusterHealth.Status != "" {
 		parts = append(parts, healthStyle(m.ClusterHealth.Status).Render(m.ClusterHealth.Status))
 	}
-	parts = append(parts, dimStyle.Render("? help · q quit"))
 	return strings.Join(parts, "  ·  ")
 }
 
@@ -434,6 +441,12 @@ func (m Model) viewHelp() string {
 			{"R", "Recent indices"},
 			{"V", "Allocation"},
 			{"W", "Tasks"},
+			{"E", "Data streams"},
+			{"U", "Cluster settings"},
+			{"Z", "Snapshots"},
+			{"Y", "Saved queries"},
+			{"Q", "Export"},
+			{"P", "Plugins"},
 			{"#", "Count docs"},
 			{"*", "Toggle favorite"},
 		}},

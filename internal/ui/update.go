@@ -643,9 +643,7 @@ func (m Model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	// Clear status on any key
 	m.StatusMsg = ""
-	m.Err = nil
 
 	// Global help — available from every browse screen (not while typing).
 	if key == "?" && !m.typingContext() {
