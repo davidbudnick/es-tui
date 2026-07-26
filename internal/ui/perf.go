@@ -79,39 +79,146 @@ func truncateLines(s string, maxLines int) (string, int) {
 	return strings.Join(lines[:maxLines], "\n"), len(lines) - maxLines
 }
 
-// (m *Model) setDetailBody caches pretty JSON when a document is opened.
+func colorizeJSONLines(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = colorizeJSONLine(line)
+	}
+	return out
+}
+
 func (m *Model) setDetailBody(doc types.Document) {
 	body, trunc := documentSourceJSON(doc)
 	m.DetailBody = body
 	m.DetailTruncated = trunc
 	m.DetailLinesCache = nil
+	m.DetailColoredCache = nil
 	m.DetailWrapWidth = 0
 }
 
-// invalidateDetailCache clears detail render caches (resize / leave detail).
 func (m *Model) invalidateDetailCache() {
 	m.DetailLinesCache = nil
+	m.DetailColoredCache = nil
 	m.DetailWrapWidth = 0
 }
 
-// setPreviewBody caches pretty JSON for the documents list preview pane.
 func (m *Model) setPreviewBody(doc types.Document) {
 	body, trunc := documentSourceJSON(doc)
 	m.PreviewDocID = doc.Index + "/" + doc.ID
 	m.PreviewBody = body
 	m.PreviewTruncated = trunc
+	m.PreviewLinesCache = nil
+	m.PreviewWrapWidth = 0
 }
 
-// refreshDocPreviewFromSelection rebuilds preview cache for the selected list row.
+func (m *Model) invalidatePreviewLinesCache() {
+	m.PreviewLinesCache = nil
+	m.PreviewWrapWidth = 0
+}
+
 func (m *Model) refreshDocPreviewFromSelection() {
 	if len(m.Documents) == 0 {
 		m.PreviewDocID = ""
 		m.PreviewBody = ""
 		m.PreviewTruncated = false
+		m.PreviewLinesCache = nil
+		m.PreviewWrapWidth = 0
 		return
 	}
 	idx := clamp(m.SelectedDocIdx, 0, len(m.Documents)-1)
 	m.setPreviewBody(m.Documents[idx])
+	m.fillPreviewLinesCache(m.previewPanelContentWidth())
+}
+
+func (m *Model) fillPreviewLinesCache(wrapWidth int) {
+	if m.PreviewBody == "" {
+		m.PreviewLinesCache = nil
+		m.PreviewWrapWidth = 0
+		return
+	}
+	if wrapWidth < 8 {
+		wrapWidth = 8
+	}
+	if m.PreviewWrapWidth == wrapWidth && m.PreviewLinesCache != nil {
+		return
+	}
+	plain := wrapPlainLines(strings.Split(m.PreviewBody, "\n"), wrapWidth)
+	m.PreviewLinesCache = colorizeJSONLines(plain)
+	m.PreviewWrapWidth = wrapWidth
+}
+
+func (m Model) previewPanelContentWidth() int {
+	if m.Width < 100 {
+		return max(m.Width-6, 20)
+	}
+	leftWidth := (m.Width * 58) / 100
+	rightWidth := m.Width - leftWidth - 1
+	return max(rightWidth-4, 20)
+}
+
+func (m *Model) clearSearchPreviewCache() {
+	m.SearchPreviewHitID = ""
+	m.SearchPreviewBody = ""
+	m.SearchPreviewTrunc = false
+	m.SearchPreviewLinesCache = nil
+	m.SearchPreviewWrapWidth = 0
+}
+
+func (m *Model) setSearchPreviewBody(doc types.Document) {
+	body, trunc := documentSourceJSON(doc)
+	m.SearchPreviewHitID = doc.Index + "/" + doc.ID
+	m.SearchPreviewBody = body
+	m.SearchPreviewTrunc = trunc
+	m.SearchPreviewLinesCache = nil
+	m.SearchPreviewWrapWidth = 0
+}
+
+func (m *Model) refreshSearchPreviewFromSelection() {
+	hits := searchHits(*m)
+	if len(hits) == 0 {
+		m.clearSearchPreviewCache()
+		return
+	}
+	idx := clamp(m.SelectedDocIdx, 0, len(hits)-1)
+	doc := hits[idx]
+	wantID := doc.Index + "/" + doc.ID
+	if m.SearchPreviewHitID != wantID || m.SearchPreviewBody == "" {
+		m.setSearchPreviewBody(doc)
+	}
+	m.fillSearchPreviewLinesCache(m.searchPreviewPanelContentWidth())
+}
+
+func (m *Model) fillSearchPreviewLinesCache(wrapWidth int) {
+	if m.SearchPreviewBody == "" {
+		m.SearchPreviewLinesCache = nil
+		m.SearchPreviewWrapWidth = 0
+		return
+	}
+	if wrapWidth < 8 {
+		wrapWidth = 8
+	}
+	if m.SearchPreviewWrapWidth == wrapWidth && m.SearchPreviewLinesCache != nil {
+		return
+	}
+	plain := wrapPlainLines(strings.Split(m.SearchPreviewBody, "\n"), wrapWidth)
+	m.SearchPreviewLinesCache = colorizeJSONLines(plain)
+	m.SearchPreviewWrapWidth = wrapWidth
+}
+
+func (m Model) searchPreviewPanelContentWidth() int {
+	if m.Width < 90 {
+		return max(m.Width-6, 20)
+	}
+	leftWidth := (m.Width * 58) / 100
+	rightWidth := m.Width - leftWidth - 1
+	return max(rightWidth-4, 20)
+}
+
+func (m *Model) invalidateJSONPaintCaches() {
+	m.invalidateDetailCache()
+	m.invalidatePreviewLinesCache()
+	m.SearchPreviewLinesCache = nil
+	m.SearchPreviewWrapWidth = 0
 }
 
 // setJSONPanel bounds settings/mappings/cluster JSON once for the panel viewer.

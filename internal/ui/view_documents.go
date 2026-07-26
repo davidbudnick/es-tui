@@ -696,7 +696,13 @@ func (m Model) buildDocumentPreviewPanel(width int) string {
 	}
 
 	maxLines := max(min(m.Height-18, maxPreviewSourceLines), 6)
-	lines := wrapPlainLines(strings.Split(plain, "\n"), max(width-2, 20))
+	wrapW := max(width-2, 20)
+	var lines []string
+	if m.PreviewDocID == wantID && m.PreviewWrapWidth == wrapW && m.PreviewLinesCache != nil {
+		lines = m.PreviewLinesCache
+	} else {
+		lines = colorizeJSONLines(wrapPlainLines(strings.Split(plain, "\n"), wrapW))
+	}
 	shown := 0
 	for _, line := range lines {
 		if shown >= maxLines {
@@ -704,7 +710,7 @@ func (m Model) buildDocumentPreviewPanel(width int) string {
 			b.WriteString("\n")
 			break
 		}
-		b.WriteString(colorizeJSONLine(line))
+		b.WriteString(line)
 		b.WriteString("\n")
 		shown++
 	}
@@ -751,6 +757,7 @@ func (m Model) viewDocumentDetail() string {
 
 	// Plain text first (like redis-tui) so wrap/scroll line counts match paint.
 	valueLines := m.documentDetailLines()
+	coloredLines := m.detailColoredLines(valueLines)
 	maxVisible := detailMaxVisible(m.Height)
 	_, displayScroll := ensureDetailCursorVisible(m.DetailCursor, m.DetailScroll, len(valueLines), maxVisible)
 	visible, topHint, bottomHint, displayScroll := scrollValueLines(valueLines, displayScroll, maxVisible)
@@ -765,6 +772,8 @@ func (m Model) viewDocumentDetail() string {
 		if abs == m.DetailCursor {
 			plain := padRight(truncateRunes(line, contentWidth), contentWidth)
 			display.WriteString(selectedStyle.Render(plain))
+		} else if abs < len(coloredLines) {
+			display.WriteString(coloredLines[abs])
 		} else {
 			display.WriteString(colorizeJSONLine(line))
 		}
@@ -808,6 +817,14 @@ func (m Model) documentDetailLines() []string {
 	return wrapPlainLines(strings.Split(body, "\n"), w)
 }
 
+func (m Model) detailColoredLines(plain []string) []string {
+	w := detailContentWidth(detailBoxWidth(m.Width))
+	if m.DetailWrapWidth == w && m.DetailColoredCache != nil && len(m.DetailColoredCache) == len(plain) {
+		return m.DetailColoredCache
+	}
+	return colorizeJSONLines(plain)
+}
+
 func (m Model) documentDetailLineCount() int {
 	return len(m.documentDetailLines())
 }
@@ -817,7 +834,7 @@ func (m Model) documentDetailLastLine() int {
 }
 
 func (m *Model) syncDocumentDetailScroll() {
-	// Populate wrap cache once per width in Update paths.
+	// Populate wrap + color caches once per width in Update paths.
 	w := detailContentWidth(detailBoxWidth(m.Width))
 	if m.DetailWrapWidth != w || m.DetailLinesCache == nil {
 		body := m.DetailBody
@@ -830,7 +847,10 @@ func (m *Model) syncDocumentDetailScroll() {
 		} else {
 			m.DetailLinesCache = wrapPlainLines(strings.Split(body, "\n"), w)
 		}
+		m.DetailColoredCache = colorizeJSONLines(m.DetailLinesCache)
 		m.DetailWrapWidth = w
+	} else if m.DetailColoredCache == nil || len(m.DetailColoredCache) != len(m.DetailLinesCache) {
+		m.DetailColoredCache = colorizeJSONLines(m.DetailLinesCache)
 	}
 	m.DetailCursor, m.DetailScroll = ensureDetailCursorVisible(
 		m.DetailCursor,

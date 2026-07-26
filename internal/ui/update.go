@@ -23,8 +23,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
-		// Rewrap detail body on next paint (cheap; avoids stale wrap at new width).
-		m.invalidateDetailCache()
+		m.invalidateJSONPaintCaches()
 		m.invalidateJSONPanelCache()
 		if m.JSONPanelPlain != "" {
 			m.syncJSONPanelWrap(jsonPanelWrapWidth(m.Width))
@@ -40,6 +39,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.Screen == types.ScreenSearch && m.SearchArea != nil {
 			m.SearchArea.SetWidth(max(msg.Width/2-6, 40))
 			m.SearchArea.SetHeight(7)
+		}
+		if m.Screen == types.ScreenDocuments {
+			m.fillPreviewLinesCache(m.previewPanelContentWidth())
+		}
+		if m.Screen == types.ScreenSearch {
+			m.fillSearchPreviewLinesCache(m.searchPreviewPanelContentWidth())
+		}
+		if m.Screen == types.ScreenDocumentDetail {
+			m.syncDocumentDetailScroll()
 		}
 		return m, nil
 
@@ -287,6 +295,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.DetailScroll = 0
 		m.DetailCursor = 0
 		m.Screen = types.ScreenDocumentDetail
+		m.syncDocumentDetailScroll()
 		return m, nil
 
 	case types.DocumentSavedMsg:
@@ -329,6 +338,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.SelectedDocIdx = 0
 		m.refreshDocListColumns(m.docListPanelWidth())
 		m.SearchFocus = "results"
+		m.refreshSearchPreviewFromSelection()
 		if m.Screen != types.ScreenSearch && m.Screen != types.ScreenDocuments {
 			m.Screen = types.ScreenSearch
 		}
@@ -608,6 +618,9 @@ func (m Model) openSearchScreen(index, initialQuery string, clearResults bool) M
 	m.SelectedDocIdx = 0
 	if clearResults {
 		m.SearchResult = nil
+		m.clearSearchPreviewCache()
+	} else {
+		m.refreshSearchPreviewFromSelection()
 	}
 	if initialQuery != "" {
 		m.SearchQuery = initialQuery
@@ -1492,18 +1505,22 @@ func (m Model) handleSearchKeys(key string, msg tea.KeyPressMsg) (tea.Model, tea
 		hits := searchHits(m)
 		if len(hits) > 0 {
 			m.SelectedDocIdx = (m.SelectedDocIdx + 1) % len(hits)
+			m.refreshSearchPreviewFromSelection()
 		}
 	case "k", "up":
 		hits := searchHits(m)
 		if len(hits) > 0 {
 			m.SelectedDocIdx = (m.SelectedDocIdx - 1 + len(hits)) % len(hits)
+			m.refreshSearchPreviewFromSelection()
 		}
 	case "g", "home":
 		m.SelectedDocIdx = 0
+		m.refreshSearchPreviewFromSelection()
 	case "G", "end":
 		hits := searchHits(m)
 		if len(hits) > 0 {
 			m.SelectedDocIdx = len(hits) - 1
+			m.refreshSearchPreviewFromSelection()
 		}
 	case "o":
 		hits := searchHits(m)

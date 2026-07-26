@@ -53,13 +53,16 @@ type Model struct {
 	PrevScreen types.Screen
 
 	// Cached renders (redis-tui): pretty-print once on load, not every View().
-	DetailBody       string   // bounded pretty JSON for CurrentDocument
-	DetailTruncated  bool     // body cut at maxJSONPrettyBytes
-	DetailLinesCache []string // wrapped lines for DetailWrapWidth
-	DetailWrapWidth  int      // content width used for DetailLinesCache
-	PreviewDocID     string   // index/id of cached list preview
-	PreviewBody      string   // bounded pretty JSON for list preview
-	PreviewTruncated bool
+	DetailBody         string   // bounded pretty JSON for CurrentDocument
+	DetailTruncated    bool     // body cut at maxJSONPrettyBytes
+	DetailLinesCache   []string // wrapped plain lines for DetailWrapWidth
+	DetailColoredCache []string // colorized lines parallel to DetailLinesCache
+	DetailWrapWidth    int      // content width used for DetailLinesCache
+	PreviewDocID       string   // index/id of cached list preview
+	PreviewBody        string   // bounded pretty JSON for list preview
+	PreviewTruncated   bool
+	PreviewLinesCache  []string // colorized wrapped lines for list preview
+	PreviewWrapWidth   int
 
 	JSONPanelRaw   string
 	JSONPanelPlain string
@@ -72,11 +75,16 @@ type Model struct {
 	DocListColsSig   string
 	DocListWithScore bool
 
-	SearchQuery  string
-	SearchResult *types.SearchResult
-	SearchIndex  string
-	SearchFrom   int
-	SearchFocus  string // "query" | "results"
+	SearchQuery             string
+	SearchResult            *types.SearchResult
+	SearchIndex             string
+	SearchFrom              int
+	SearchFocus             string // "query" | "results"
+	SearchPreviewHitID      string // index/id of cached search hit preview
+	SearchPreviewBody       string // bounded pretty JSON for selected hit
+	SearchPreviewTrunc      bool
+	SearchPreviewLinesCache []string // colorized wrapped lines for hit preview
+	SearchPreviewWrapWidth  int
 	// SearchArea is the multiline query editor on the search screen.
 	SearchArea   *textarea.Model
 	QueryHistory []string
