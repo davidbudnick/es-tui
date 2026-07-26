@@ -106,9 +106,7 @@ func (m Model) buildDocumentsListPanel(width int) string {
 		return b.String()
 	}
 
-	// Columns: ID + best label field + up to 2 context fields (coverage-aware).
-	cols := pickDocumentListColumns(m.Documents, width)
-	withScore := docsHaveUsefulScores(m.Documents)
+	cols, withScore := m.documentListColumns(width)
 
 	// Header
 	var hdr strings.Builder

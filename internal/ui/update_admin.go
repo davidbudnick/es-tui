@@ -65,6 +65,7 @@ func (m Model) handleAdminMessages(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		m.ClusterSettings = msg.Settings
+		m.setJSONPanel(msg.Settings)
 		m.DetailScroll = 0
 		m.Screen = types.ScreenClusterSettings
 		return m, nil, true

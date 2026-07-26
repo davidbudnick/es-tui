@@ -113,3 +113,133 @@ func (m *Model) refreshDocPreviewFromSelection() {
 	idx := clamp(m.SelectedDocIdx, 0, len(m.Documents)-1)
 	m.setPreviewBody(m.Documents[idx])
 }
+
+// setJSONPanel bounds settings/mappings/cluster JSON once for the panel viewer.
+func (m *Model) setJSONPanel(raw string) {
+	m.JSONPanelRaw = raw
+	if raw == "" {
+		m.JSONPanelPlain = ""
+		m.JSONPanelLines = nil
+		m.JSONPanelWidth = 0
+		m.JSONPanelTrunc = false
+		return
+	}
+	plain, trunc := boundJSONBody(raw)
+	if plain == "" {
+		plain = raw
+	}
+	if lines, dropped := truncateLines(plain, maxJSONPanelLines); dropped > 0 {
+		plain = lines
+		trunc = true
+	}
+	m.JSONPanelPlain = plain
+	m.JSONPanelTrunc = trunc
+	m.JSONPanelLines = nil
+	m.JSONPanelWidth = 0
+	if m.Width > 0 {
+		m.syncJSONPanelWrap(jsonPanelWrapWidth(m.Width))
+	}
+}
+
+// syncJSONPanelWrap fills wrapped lines for the given content width.
+func (m *Model) syncJSONPanelWrap(width int) {
+	if width <= 0 {
+		width = 40
+	}
+	if m.JSONPanelPlain == "" {
+		m.JSONPanelLines = nil
+		m.JSONPanelWidth = width
+		return
+	}
+	if m.JSONPanelWidth == width && m.JSONPanelLines != nil {
+		return
+	}
+	m.JSONPanelLines = wrapPlainLines(strings.Split(m.JSONPanelPlain, "\n"), width)
+	m.JSONPanelWidth = width
+}
+
+// invalidateJSONPanelCache drops wrap lines so the next sync rewraps.
+func (m *Model) invalidateJSONPanelCache() {
+	m.JSONPanelLines = nil
+	m.JSONPanelWidth = 0
+}
+
+func jsonPanelWrapWidth(termWidth int) int {
+	return max(termWidth-8, 40)
+}
+
+// jsonPanelLines returns wrapped plain lines for body, preferring the Update cache.
+func (m Model) jsonPanelLines(body string, width int) (lines []string, trunc bool) {
+	if body == "" {
+		return nil, false
+	}
+	if m.JSONPanelRaw == body && m.JSONPanelPlain != "" {
+		trunc = m.JSONPanelTrunc
+		if m.JSONPanelWidth == width && m.JSONPanelLines != nil {
+			return m.JSONPanelLines, trunc
+		}
+		return wrapPlainLines(strings.Split(m.JSONPanelPlain, "\n"), width), trunc
+	}
+	plain, trunc := boundJSONBody(body)
+	if plain == "" {
+		plain = body
+	}
+	if limited, dropped := truncateLines(plain, maxJSONPanelLines); dropped > 0 {
+		plain = limited
+		trunc = true
+	}
+	return wrapPlainLines(strings.Split(plain, "\n"), width), trunc
+}
+
+func docListSignature(docs []types.Document, from int) string {
+	n := len(docs)
+	if n == 0 {
+		return fmt.Sprintf("0@%d", from)
+	}
+	return fmt.Sprintf("%d@%d:%s:%s", n, from, docs[0].ID, docs[n-1].ID)
+}
+
+func (m Model) docListPanelWidth() int {
+	if m.Width < 100 {
+		return max(m.Width-4, 40)
+	}
+	return (m.Width*58)/100 - 2
+}
+
+// refreshDocListColumns memoizes page columns and score usefulness for the list panel.
+func (m *Model) refreshDocListColumns(width int) {
+	if width <= 0 {
+		width = m.docListPanelWidth()
+	}
+	if width <= 0 {
+		width = 80
+	}
+	if len(m.Documents) == 0 {
+		m.DocListCols = nil
+		m.DocListColsWidth = width
+		m.DocListColsSig = docListSignature(nil, m.DocFrom)
+		m.DocListWithScore = false
+		return
+	}
+	m.DocListCols = pickDocumentListColumns(m.Documents, width)
+	m.DocListColsWidth = width
+	m.DocListColsSig = docListSignature(m.Documents, m.DocFrom)
+	m.DocListWithScore = docsHaveUsefulScores(m.Documents)
+}
+
+// documentListColumns returns memoized columns when the page/width still match.
+func (m Model) documentListColumns(width int) (cols []docListCol, withScore bool) {
+	sig := docListSignature(m.Documents, m.DocFrom)
+	if m.DocListCols != nil && m.DocListColsWidth == width && m.DocListColsSig == sig {
+		return m.DocListCols, m.DocListWithScore
+	}
+	return pickDocumentListColumns(m.Documents, width), docsHaveUsefulScores(m.Documents)
+}
+
+// invalidateDocListColumns clears memoized document list columns.
+func (m *Model) invalidateDocListColumns() {
+	m.DocListCols = nil
+	m.DocListColsWidth = 0
+	m.DocListColsSig = ""
+	m.DocListWithScore = false
+}

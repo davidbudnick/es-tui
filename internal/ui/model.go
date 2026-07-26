@@ -61,6 +61,17 @@ type Model struct {
 	PreviewBody      string   // bounded pretty JSON for list preview
 	PreviewTruncated bool
 
+	JSONPanelRaw   string
+	JSONPanelPlain string
+	JSONPanelLines []string
+	JSONPanelWidth int
+	JSONPanelTrunc bool
+
+	DocListCols      []docListCol
+	DocListColsWidth int
+	DocListColsSig   string
+	DocListWithScore bool
+
 	SearchQuery  string
 	SearchResult *types.SearchResult
 	SearchIndex  string
