@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/davidbudnick/es-tui/internal/testutil"
 	"github.com/davidbudnick/es-tui/internal/types"
 )
 
@@ -674,4 +675,60 @@ func TestConnectionFormTyping(t *testing.T) {
 	nm, _ := m.handleKeyPress(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	m = nm.(Model)
 	_ = m
+}
+
+func typeText(m Model, s string) Model {
+	for _, r := range s {
+		msg := tea.KeyPressMsg{Code: r, Text: string(r)}
+		if r == ' ' {
+			msg = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+		}
+		nm, _ := m.handleKeyPress(msg)
+		m = nm.(Model)
+	}
+	return m
+}
+
+func TestConnectionFormTextFieldsAcceptAllKeys(t *testing.T) {
+	m, _ := testModel(t)
+	m.Screen = types.ScreenAddConnection
+	m.ConnInputs = createConnectionInputs()
+	m.ConnFocusIdx = connFieldName
+	m.ConnInputs[connFieldName].Focus()
+
+	m = typeText(m, "elastic search hl")
+	testutil.AssertEqual(t, m.ConnInputs[connFieldName].Value(), "elastic search hl")
+
+	// ←/→ move the cursor inside a text field.
+	m = typeText(m, "X")
+	m = applyKey(m, "left")
+	m = applyKey(m, "left")
+	m = typeText(m, "Y")
+	m = applyKey(m, "right")
+	m = typeText(m, "Z")
+	testutil.AssertEqual(t, m.ConnInputs[connFieldName].Value(), "elastic search hYlZX")
+
+	m.ConnInputs[connFieldName].Blur()
+	m.ConnFocusIdx = connFieldPass
+	m.ConnInputs[connFieldPass].Focus()
+	m = typeText(m, "hello world")
+	testutil.AssertEqual(t, m.ConnInputs[connFieldPass].Value(), "hello world")
+}
+
+func TestConnectionFormFlavorAndReadOnlyKeys(t *testing.T) {
+	m, _ := testModel(t)
+	m.Screen = types.ScreenAddConnection
+	m.ConnInputs = createConnectionInputs()
+
+	m.ConnFocusIdx = connFieldFlavor
+	m.ConnFlavorIdx = 0
+	m = typeText(m, "l")
+	testutil.AssertEqual(t, m.ConnFlavorIdx, 1)
+	m = typeText(m, "h")
+	testutil.AssertEqual(t, m.ConnFlavorIdx, 0)
+
+	m.ConnFocusIdx = connFieldReadOnly
+	m.ConnReadOnly = false
+	m = typeText(m, " ")
+	testutil.AssertEqual(t, m.ConnReadOnly, true)
 }
