@@ -869,6 +869,7 @@ func (m Model) handleConnectionFormKeys(key string, msg tea.KeyPressMsg) (tea.Mo
 			m.ConnReadOnly = !m.ConnReadOnly
 			return m, nil
 		}
+		return m.updateFocusedConnInput(msg)
 	case "enter":
 		// Enter always saves (space/←/→ handle engine + read-only).
 		conn, err := m.connectionFromInputs()
@@ -891,17 +892,24 @@ func (m Model) handleConnectionFormKeys(key string, msg tea.KeyPressMsg) (tea.Mo
 			m.ConnFlavorIdx = (m.ConnFlavorIdx - 1 + len(connFlavorOptions)) % len(connFlavorOptions)
 			return m, nil
 		}
+		return m.updateFocusedConnInput(msg)
 	case "right", "l":
 		if m.ConnFocusIdx == connFieldFlavor {
 			m.ConnFlavorIdx = (m.ConnFlavorIdx + 1) % len(connFlavorOptions)
 			return m, nil
 		}
+		return m.updateFocusedConnInput(msg)
 	default:
-		if m.ConnFocusIdx >= 0 && m.ConnFocusIdx < connTextCount && m.ConnFocusIdx < len(m.ConnInputs) {
-			var cmd tea.Cmd
-			m.ConnInputs[m.ConnFocusIdx], cmd = m.ConnInputs[m.ConnFocusIdx].Update(msg)
-			return m, cmd
-		}
+		return m.updateFocusedConnInput(msg)
+	}
+}
+
+// updateFocusedConnInput forwards a key to the focused text field, if any.
+func (m Model) updateFocusedConnInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.ConnFocusIdx >= 0 && m.ConnFocusIdx < connTextCount && m.ConnFocusIdx < len(m.ConnInputs) {
+		var cmd tea.Cmd
+		m.ConnInputs[m.ConnFocusIdx], cmd = m.ConnInputs[m.ConnFocusIdx].Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
