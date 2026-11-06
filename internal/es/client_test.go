@@ -2,8 +2,10 @@ package es
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -888,4 +890,31 @@ func TestBearerAuthPriority(t *testing.T) {
 	if gotAuth != "Bearer t" {
 		t.Fatalf("test auth %q", gotAuth)
 	}
+}
+
+// TestIntValBounds checks intVal keeps int extremes and rejects out-of-range values.
+func TestIntValBounds(t *testing.T) {
+	if got := intVal(math.MinInt); got != math.MinInt {
+		t.Fatalf("intVal(MinInt) = %d", got)
+	}
+	if got := intVal(math.MaxInt); got != math.MaxInt {
+		t.Fatalf("intVal(MaxInt) = %d", got)
+	}
+	t.Run("out of 32-bit range", func(t *testing.T) {
+		// On 64-bit the guard cannot reject any int64 from ParseInt(bitSize 64).
+		if strconv.IntSize != 32 {
+			t.Skip("only meaningful when int is 32 bits")
+		}
+		low := int64(math.MinInt32) - 1
+		high := int64(math.MaxInt32) + 1
+		for _, v := range []any{
+			low, high,
+			strconv.FormatInt(low, 10), strconv.FormatInt(high, 10),
+			json.Number(strconv.FormatInt(low, 10)), json.Number(strconv.FormatInt(high, 10)),
+		} {
+			if got := intVal(v); got != 0 {
+				t.Fatalf("intVal(%#v) = %d, want 0", v, got)
+			}
+		}
+	})
 }
