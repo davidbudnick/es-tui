@@ -259,11 +259,22 @@ func extractBinary(archivePath, destDir string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		base := filepath.Base(hdr.Name)
-		if base != "es-tui" && base != "es-tui.exe" {
+		if !filepath.IsLocal(hdr.Name) {
+			return "", fmt.Errorf("unsafe archive entry: %q", hdr.Name)
+		}
+		var name string
+		switch filepath.Base(hdr.Name) {
+		case "es-tui":
+			name = "es-tui"
+		case "es-tui.exe":
+			name = "es-tui.exe"
+		default:
 			continue
 		}
-		outPath := filepath.Join(destDir, base)
+		outPath := filepath.Join(destDir, name)
+		if rel, err := filepath.Rel(destDir, outPath); err != nil || !filepath.IsLocal(rel) {
+			return "", fmt.Errorf("unsafe output path: %q", outPath)
+		}
 		// Executable bit required for install; stays under temp destDir until swap.
 		out, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o750) // #nosec G302 G304
 		if err != nil {

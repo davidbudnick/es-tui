@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1322,7 +1323,11 @@ func str(v any) string {
 }
 
 func intVal(v any) int {
-	return int(int64Val(v))
+	n := int64Val(v)
+	if n < math.MinInt || n > math.MaxInt {
+		return 0
+	}
+	return int(n)
 }
 
 func int64Val(v any) int64 {
