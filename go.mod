@@ -1,11 +1,11 @@
 module github.com/davidbudnick/es-tui
 
-go 1.26.10
+go 1.26.11
 
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.1
-	charm.land/lipgloss/v2 v2.0.6
+	charm.land/lipgloss/v2 v2.1.0
 	github.com/atotto/clipboard v0.1.4
 )
 
